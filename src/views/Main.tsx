@@ -24,6 +24,9 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
   const [activeTab, setActiveTab] = useState<'employees' | 'reports'>('employees');
   const [activeAuditEmployeeId, setActiveAuditEmployeeId] = useState<string | null>(null);
   const [showPayslipEmpId, setShowPayslipEmpId] = useState<string | null>(null);
+  const [auditSearchQuery, setAuditSearchQuery] = useState('');
+  const [auditTaxFilter, setAuditTaxFilter] = useState<'all' | 'FREELANCER' | 'FOUR_MAJOR'>('all');
+  const [showBulkStatements, setShowBulkStatements] = useState(false);
 
   const handleExport = () => {
     if (employees.length === 0) {
@@ -110,36 +113,36 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
         >
           <div className="glass-card p-8 space-y-6">
             <h2 className="text-2xl font-bold flex items-center gap-2">
-              <Calculator className="text-blue-600" />
-              급여 관리 시작하기
-            </h2>
-            <p className="text-slate-600 leading-relaxed">
-              학원 조교들의 출퇴근 기록을 업로드하고, 주휴수당과 세금을 자동으로 계산하세요. 
-              3.3% 프리랜서 및 4대보험 공제 방식을 모두 지원합니다.
-            </p>
-            <button
-              onClick={onCreatePayroll}
-              className="btn-3d w-full text-lg group"
-            >
-              조교급여 생성
-              <ChevronRight className="ml-2 group-hover:translate-x-1 transition-transform" />
-            </button>
-          </div>
-
-          <div className="glass-card p-8 space-y-6">
-            <h2 className="text-2xl font-bold flex items-center gap-2">
               <Users className="text-purple-600" />
               인력 관리
             </h2>
             <p className="text-slate-600 leading-relaxed">
-              조교들의 기본 정보, 시급, 근로계약 시간을 등록하고 관리합니다. 
-              입사일과 퇴사일 관리를 통해 체계적인 인력 운영이 가능합니다.
+              조교들의 기본 정보, 시급, 근로계약 시간, 고정 수당 및 부서 정보를 등록하고 관리합니다. 
+              체계적인 기본 마스터 데이터를 먼저 등록해 두어야 정확한 급여대장 산출이 가능합니다.
             </p>
             <button
               onClick={onManageEmployees}
               className="btn-3d-secondary w-full text-lg group"
             >
               조교 정보 관리
+              <ChevronRight className="ml-2 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </div>
+
+          <div className="glass-card p-8 space-y-6">
+            <h2 className="text-2xl font-bold flex items-center gap-2">
+              <Calculator className="text-blue-600" />
+              급여 관리 시작하기
+            </h2>
+            <p className="text-slate-600 leading-relaxed">
+              학원 조교들의 출퇴근 기록을 업로드하고, 주휴수당과 세금을 자동으로 계산하세요. 
+              3.3% 프리랜서, 4대보험 공제 방식 및 커스텀 세율(%) 임의 산출을 완벽하게 처리합니다.
+            </p>
+            <button
+              onClick={onCreatePayroll}
+              className="btn-3d w-full text-lg group"
+            >
+              조교급여 대장 생성
               <ChevronRight className="ml-2 group-hover:translate-x-1 transition-transform" />
             </button>
           </div>
@@ -306,6 +309,8 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                   onClick={() => {
                     setViewingReport(null);
                     setActiveAuditEmployeeId(null);
+                    setAuditSearchQuery('');
+                    setAuditTaxFilter('all');
                   }}
                   className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-all"
                 >
@@ -342,31 +347,104 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
               {/* Side-by-Side Detail Panel */}
               <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
                 {/* Left side: list of employees calculated */}
-                <div className="w-full md:w-80 border-r border-slate-100 bg-slate-50/50 overflow-y-auto p-4 space-y-2">
-                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3">직원 목록</h4>
-                  {viewingReport.calculated.map((calc) => (
-                    <button
-                      key={calc.employeeId}
-                      onClick={() => setActiveAuditEmployeeId(calc.employeeId)}
-                      className={cn(
-                        "w-full text-left p-4 rounded-xl border transition-all flex justify-between items-center",
-                        activeAuditEmployeeId === calc.employeeId
-                          ? "bg-white border-slate-900 shadow-md translate-x-1"
-                          : "bg-white/40 border-slate-100 hover:bg-white"
-                      )}
-                    >
-                      <div className="space-y-1">
-                        <div className="font-extrabold text-slate-900">{calc.name}</div>
-                        <div className="text-xs text-slate-500">{calc.position}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold inline-block mb-1">
-                          {calc.taxType === 'FREELANCER' ? '3.3%' : '4대보험'}
-                        </div>
-                        <div className="font-extrabold text-sm text-slate-800">{formatCurrency(calc.netSalary)}</div>
-                      </div>
-                    </button>
-                  ))}
+                <div className="w-full md:w-80 border-r border-slate-100 bg-slate-50/50 overflow-y-auto p-4 flex flex-col">
+                  {/* Search and filters */}
+                  <div className="space-y-2 mb-4 bg-white/80 p-3 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-2.5 text-slate-400 h-3.5 w-3.5" />
+                      <input
+                        type="text"
+                        placeholder="이름으로 검색..."
+                        value={auditSearchQuery}
+                        onChange={(e) => setAuditSearchQuery(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-850"
+                      />
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => setAuditTaxFilter('all')}
+                        className={cn(
+                          "flex-1 py-1.5 text-[10px] font-black rounded transition-all",
+                          auditTaxFilter === 'all' ? "bg-slate-950 text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+                        )}
+                      >
+                        전체
+                      </button>
+                      <button
+                        onClick={() => setAuditTaxFilter('FREELANCER')}
+                        className={cn(
+                          "flex-1 py-1.5 text-[10px] font-black rounded transition-all",
+                          auditTaxFilter === 'FREELANCER' ? "bg-blue-600 text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+                        )}
+                      >
+                        3.3% 프리
+                      </button>
+                      <button
+                        onClick={() => setAuditTaxFilter('FOUR_MAJOR')}
+                        className={cn(
+                          "flex-1 py-1.5 text-[10px] font-black rounded transition-all",
+                          auditTaxFilter === 'FOUR_MAJOR' ? "bg-purple-600 text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+                        )}
+                      >
+                        4대보험
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between mb-3 px-1">
+                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-wider">직원 목록</h4>
+                    {viewingReport.calculated.length > 0 && (
+                      <button
+                        onClick={() => setShowBulkStatements(true)}
+                        className="flex items-center gap-1 px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black rounded-lg transition-all shadow-sm cursor-pointer"
+                      >
+                        <Printer size={11} />
+                        전원 일괄인쇄
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                    {(() => {
+                      const list = viewingReport.calculated.filter((calc) => {
+                        const nameMatch = calc.name.toLowerCase().includes(auditSearchQuery.toLowerCase());
+                        const taxMatch = auditTaxFilter === 'all' || calc.taxType === auditTaxFilter;
+                        return nameMatch && taxMatch;
+                      });
+
+                      if (list.length === 0) {
+                        return (
+                          <div className="text-center py-8 text-slate-400 text-xs font-bold bg-white/30 rounded-xl border border-dashed border-slate-200">
+                            검색 결과가 없습니다.
+                          </div>
+                        );
+                      }
+
+                      return list.map((calc) => (
+                        <button
+                          key={calc.employeeId}
+                          onClick={() => setActiveAuditEmployeeId(calc.employeeId)}
+                          className={cn(
+                            "w-full text-left p-3.5 rounded-xl border transition-all flex justify-between items-center",
+                            activeAuditEmployeeId === calc.employeeId
+                              ? "bg-white border-slate-900 shadow-md translate-x-1"
+                              : "bg-white/40 border-slate-100 hover:bg-white"
+                          )}
+                        >
+                          <div className="space-y-1">
+                            <div className="font-extrabold text-slate-900 text-sm leading-tight">{calc.name}</div>
+                            <div className="text-xs text-slate-500">{calc.position}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[9px] bg-slate-150 text-slate-600 px-1.5 py-0.5 rounded font-black inline-block mb-1 font-mono uppercase tracking-tight">
+                              {calc.taxType === 'FREELANCER' ? '3.3%' : '4대보험'}
+                            </div>
+                            <div className="font-black text-xs text-slate-850">{formatCurrency(calc.netSalary)}</div>
+                          </div>
+                        </button>
+                      ));
+                    })()}
+                  </div>
                 </div>
 
                 {/* Right side: selected employee audit logs */}
@@ -576,6 +654,24 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
             calculated={calculated as any}
             academyName={viewingReport.academyName}
             onClose={() => setShowPayslipEmpId(null)}
+          />
+        );
+      })()}
+
+      {/* Bulk Wage Statement Sheet for Audited Reports */}
+      {showBulkStatements && viewingReport && (() => {
+        const statements = viewingReport.calculated.map(calc => {
+          const emp = viewingReport.employees.find(e => e.id === calc.employeeId);
+          return emp ? { employee: emp, calculated: calc } : null;
+        }).filter(Boolean) as Array<{ employee: Employee; calculated: any }>;
+
+        if (statements.length === 0) return null;
+
+        return (
+          <WageStatementSheet
+            allStatements={statements}
+            academyName={viewingReport.academyName}
+            onClose={() => setShowBulkStatements(false)}
           />
         );
       })()}
