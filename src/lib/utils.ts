@@ -19,3 +19,28 @@ export function calculateWeeklyHolidayAllowance(weeklyHours: number, hourlyWage:
   const cappedHours = Math.min(weeklyHours, 40);
   return (cappedHours / 40) * 8 * hourlyWage;
 }
+
+export function calculateNightHours(clockIn?: string, clockOut?: string): number {
+  if (!clockIn || !clockOut) return 0;
+  const parseTime = (t: string) => {
+    const [h, m] = t.split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+
+  const startMin = parseTime(clockIn);
+  let endMin = parseTime(clockOut);
+
+  if (endMin < startMin) {
+    endMin += 24 * 60; // crossed midnight
+  }
+
+  let nightMin = 0;
+  for (let m = startMin; m < endMin; m++) {
+    const minOfDay = m % (24 * 60);
+    // Night is 22:00 (1320 min) to 06:00 (360 min)
+    if (minOfDay >= 22 * 60 || minOfDay < 6 * 60) {
+      nightMin++;
+    }
+  }
+  return nightMin / 60;
+}

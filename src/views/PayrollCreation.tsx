@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ChevronRight, 
@@ -11,25 +11,63 @@ import {
   Coffee,
   Calculator,
   Download,
-  Building2
+  Building2,
+  Settings,
+  Plus,
+  Coins
 } from 'lucide-react';
-import { Employee, AttendanceRecord, PayrollStep } from '../types';
+import { Employee, AttendanceRecord, PayrollStep, PayrollReport, EmployeeAllowances } from '../types';
 import { TAX_RATES_2026 } from '../constants';
-import { cn, formatCurrency, calculateWeeklyHolidayAllowance } from '../lib/utils';
-import { format, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, parse, differenceInMinutes } from 'date-fns';
+import { cn, formatCurrency, calculateWeeklyHolidayAllowance, calculateNightHours } from '../lib/utils';
+import { format, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, parse, differenceInMinutes, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
+import * as XLSX from 'xlsx';
+import WageStatementSheet from '../components/WageStatementSheet';
 
 interface PayrollCreationProps {
   employees: Employee[];
   onBack: () => void;
+  onSaveReport: (report: PayrollReport) => void;
 }
 
-export default function PayrollCreation({ employees, onBack }: PayrollCreationProps) {
+export default function PayrollCreation({ employees, onBack, onSaveReport }: PayrollCreationProps) {
   const [step, setStep] = useState(1);
   const [academyName, setAcademyName] = useState('');
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [selectedWeek, setSelectedWeek] = useState(new Date());
-  const [weeklyHolidayStatus, setWeeklyHolidayStatus] = useState<Record<string, Record<number, boolean>>>({}); // employeeId -> weekIndex -> boolean
+  const [weeklyHolidayStatus, setWeeklyHolidayStatus] = useState<Record<string, Record<number, boolean>>>({}); 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [employeeTaxOverrides, setEmployeeTaxOverrides] = useState<Record<string, { taxType: 'FREELANCER' | 'FOUR_MAJOR' | 'CUSTOM', customTaxRate: number }>>({});
+  const [employeeAllowanceOverrides, setEmployeeAllowanceOverrides] = useState<Record<string, EmployeeAllowances>>({});
+  const [activePayslipEmpId, setActivePayslipEmpId] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (employees && employees.length > 0) {
+      const initialTaxes: Record<string, { taxType: 'FREELANCER' | 'FOUR_MAJOR' | 'CUSTOM', customTaxRate: number }> = {};
+      const initialAllowances: Record<string, EmployeeAllowances> = {};
+
+      employees.forEach(emp => {
+        initialTaxes[emp.id] = {
+          taxType: emp.taxType || 'FREELANCER',
+          customTaxRate: emp.customTaxRate || 3.3
+        };
+        initialAllowances[emp.id] = emp.allowances || {
+          position: 0,
+          qualification: 0,
+          businessPromotion: 0,
+          cashier: 0,
+          meal: 0,
+          other: 0,
+          omitted: 0
+        };
+      });
+
+      setEmployeeTaxOverrides(initialTaxes);
+      setEmployeeAllowanceOverrides(initialAllowances);
+    }
+  }, [employees]);
+
 
   // Step 1: Academy Name
   const handleAcademySubmit = (e: React.FormEvent) => {
@@ -37,37 +75,64 @@ export default function PayrollCreation({ employees, onBack }: PayrollCreationPr
     if (academyName) setStep(2);
   };
 
-  // Step 3: File Upload (Simulation)
-  const handleFileUpload = () => {
-    // Simulate parsing a file
-    const records: AttendanceRecord[] = [];
-    const startDate = startOfWeek(selectedWeek, { weekStartsOn: 1 });
-    
-    employees.forEach(emp => {
-      eachDayOfInterval({
-        start: startDate,
-        end: endOfWeek(startDate, { weekStartsOn: 1 })
-      }).forEach(date => {
-        const dayName = format(date, 'eeeeee', { locale: ko }) as any;
-        const standard = emp.standardWorkHours[dayName as keyof typeof emp.standardWorkHours];
-        
-        if (standard) {
-          // 90% chance of being present for demo
-          const isPresent = Math.random() > 0.1;
-          records.push({
-            employeeId: emp.id,
-            date: format(date, 'yyyy-MM-dd'),
-            clockIn: isPresent ? standard.start : undefined,
-            clockOut: isPresent ? standard.end : undefined,
-            hasBreak: false,
-            isAbsence: !isPresent,
-          });
+  // Step 3: File Upload (Real Parsing)
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const bstr = evt.target?.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+
+      // Skip header row (index 0)
+      const rows = data.slice(1);
+      
+      const parsedRecords: AttendanceRecord[] = [];
+
+      rows.forEach(row => {
+        const dateStr = row[0]; // A: 출퇴근일
+        const name = row[1];    // B: 이름
+        const clockIn = row[4]; // E: 출근 시간
+        const clockOut = row[5];// F: 퇴근 시간
+
+        if (!dateStr || !name) return;
+
+        // Find matching employee
+        const employee = employees.find(emp => emp.name === name);
+        if (!employee) return;
+
+        // Format date (Excel might provide date objects or strings)
+        let formattedDate = '';
+        if (typeof dateStr === 'number') {
+          // Excel serial date
+          const date = XLSX.SSF.parse_date_code(dateStr);
+          formattedDate = `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
+        } else {
+          formattedDate = String(dateStr).trim();
         }
+
+        parsedRecords.push({
+          employeeId: employee.id,
+          date: formattedDate,
+          clockIn: clockIn && clockIn !== '-' ? String(clockIn).trim() : undefined,
+          clockOut: clockOut && clockOut !== '-' ? String(clockOut).trim() : undefined,
+          hasBreak: false,
+          isAbsence: !clockIn || clockIn === '-',
+        });
       });
-    });
-    
-    setAttendance(records);
-    setStep(3);
+
+      setAttendance(parsedRecords);
+      setStep(3);
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const triggerFileInput = () => {
+    fileInputRef.current?.click();
   };
 
   const toggleBreak = (employeeId: string, date: string) => {
@@ -145,13 +210,20 @@ export default function PayrollCreation({ employees, onBack }: PayrollCreationPr
       </div>
 
       <div className="glass-card p-12 text-center border-2 border-dashed border-slate-200 hover:border-blue-400 transition-colors group">
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          accept=".xlsx, .xls, .csv"
+          className="hidden"
+        />
         <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:bg-blue-50 transition-colors">
           <Upload size={40} className="text-slate-400 group-hover:text-blue-500 transition-colors" />
         </div>
         <h3 className="text-xl font-bold text-slate-800 mb-2">출퇴근 기록 파일 업로드</h3>
         <p className="text-slate-500 mb-8">엑셀(XLSX) 또는 CSV 파일을 드래그하거나 클릭하여 선택하세요.</p>
         <button
-          onClick={handleFileUpload}
+          onClick={triggerFileInput}
           className="btn-3d px-10"
         >
           파일 불러오기
@@ -322,112 +394,510 @@ export default function PayrollCreation({ employees, onBack }: PayrollCreationPr
     </motion.div>
   );
 
+  const computeEmployeePayroll = (emp: Employee) => {
+    const weeklyHours = getWeeklyHours(emp.id);
+    const holidayAllowance = weeklyHolidayStatus[emp.id]?.[0] !== false ? calculateWeeklyHolidayAllowance(weeklyHours, emp.hourlyWage) : 0;
+    const baseSalary = weeklyHours * emp.hourlyWage;
+
+    // Get overrides
+    const taxOverride = employeeTaxOverrides[emp.id] || {
+      taxType: emp.taxType || 'FREELANCER',
+      customTaxRate: emp.customTaxRate || 3.3
+    };
+
+    const allowanceOverride = employeeAllowanceOverrides[emp.id] || emp.allowances || {
+      position: 0,
+      qualification: 0,
+      businessPromotion: 0,
+      cashier: 0,
+      meal: 0,
+      other: 0,
+      omitted: 0
+    };
+
+    const posAllowance = Number(allowanceOverride.position || 0);
+    const qualAllowance = Number(allowanceOverride.qualification || 0);
+    const bizAllowance = Number(allowanceOverride.businessPromotion || 0);
+    const cashAllowance = Number(allowanceOverride.cashier || 0);
+    const mealAllowance = Number(allowanceOverride.meal || 0);
+    const otherAllowance = Number(allowanceOverride.other || 0);
+    const omittedAllowance = Number(allowanceOverride.omitted || 0);
+
+    const totalAllowances = posAllowance + qualAllowance + bizAllowance + cashAllowance + mealAllowance + otherAllowance + omittedAllowance;
+    const totalGross = baseSalary + holidayAllowance + totalAllowances;
+
+    // Standard 20만원 limits for non-taxable meals
+    const nonTaxableAmount = Math.min(200000, mealAllowance);
+    const taxableGross = Math.max(0, totalGross - nonTaxableAmount);
+
+    let deductions: Record<string, number> = {};
+    let totalDeduction = 0;
+
+    if (taxOverride.taxType === 'FREELANCER') {
+      const incomeTax = Math.floor(taxableGross * 0.03);
+      const localTax = Math.floor(incomeTax * 0.1);
+      deductions = {
+        '소득세 (3.0%)': incomeTax,
+        '지방소득세 (0.3%)': localTax,
+      };
+      totalDeduction = incomeTax + localTax;
+    } else if (taxOverride.taxType === 'CUSTOM') {
+      const rate = (taxOverride.customTaxRate || 0) / 100;
+      const incomeTax = Math.floor(taxableGross * rate);
+      const localTax = Math.floor(incomeTax * 0.1);
+      deductions = {
+        [`소득세 (${taxOverride.customTaxRate}%)`]: incomeTax,
+        '지방소득세 (10%)': localTax,
+      };
+      totalDeduction = incomeTax + localTax;
+    } else {
+      const np = Math.floor(taxableGross * TAX_RATES_2026.FOUR_MAJOR.NATIONAL_PENSION);
+      const hi = Math.floor(taxableGross * TAX_RATES_2026.FOUR_MAJOR.HEALTH_INSURANCE);
+      const ltc = Math.floor(hi * TAX_RATES_2026.FOUR_MAJOR.LONG_TERM_CARE);
+      const ei = Math.floor(taxableGross * TAX_RATES_2026.FOUR_MAJOR.EMPLOYMENT_INSURANCE);
+
+      deductions = {
+        '국민연금 (4.5%)': np,
+        '건강보험 (3.545%)': hi,
+        '장기요양보험': ltc,
+        '고용보험 (0.9%)': ei,
+      };
+      totalDeduction = np + hi + ltc + ei;
+    }
+
+    const netSalary = totalGross - totalDeduction;
+
+    // Advanced work statistics calculation
+    const personRecords = attendance.filter(r => r.employeeId === emp.id);
+    const workDaysCount = personRecords.filter(r => !r.isAbsence && r.clockIn && r.clockOut).length;
+
+    let totalMinutes = 0;
+    let overtimeHours = 0;
+    let nightHours = 0;
+    let holidayHours = 0;
+
+    personRecords.forEach(record => {
+      if (record.isAbsence || !record.clockIn || !record.clockOut) return;
+
+      const start = parse(record.clockIn, 'HH:mm', new Date());
+      const end = parse(record.clockOut, 'HH:mm', new Date());
+      let diff = differenceInMinutes(end, start);
+      if (record.hasBreak) {
+        if (diff >= 480) diff -= 60;
+        else if (diff >= 240) diff -= 30;
+      }
+      totalMinutes += diff;
+
+      const activeHours = Math.max(0, diff / 60);
+      if (activeHours > 8) {
+        overtimeHours += (activeHours - 8);
+      }
+
+      const nHours = calculateNightHours(record.clockIn, record.clockOut);
+      nightHours += nHours;
+
+      const rDate = parse(record.date, 'yyyy-MM-dd', new Date());
+      const dayIndex = rDate.getDay();
+      const isWeekend = dayIndex === 0 || dayIndex === 6;
+      const daysStr = ['일', '월', '화', '수', '목', '금', '토'];
+      const isCustomHoliday = daysStr[dayIndex] === emp.weeklyHoliday;
+
+      if (isWeekend || isCustomHoliday) {
+        holidayHours += activeHours;
+      }
+    });
+
+    return {
+      employeeId: emp.id,
+      name: emp.name,
+      position: emp.position,
+      weeklyHours,
+      baseSalary,
+      holidayAllowance,
+      allowancesAmount: totalAllowances,
+      itemizedAllowances: allowanceOverride,
+      totalGross,
+      deductions,
+      totalDeduction,
+      netSalary,
+      taxType: taxOverride.taxType,
+      customTaxRate: taxOverride.customTaxRate,
+      workDaysCount,
+      totalMinutes,
+      overtimeHours,
+      nightHours,
+      holidayHours
+    };
+  };
+
+  const handleSaveAndExit = (shouldDownloadJSON: boolean) => {
+    const reportCalculations = employees.map(emp => {
+      return computeEmployeePayroll(emp);
+    });
+
+    const newReport: PayrollReport = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      academyName,
+      employees,
+      attendance,
+      weeklyHolidayStatus,
+      calculated: reportCalculations
+    };
+
+    onSaveReport(newReport);
+
+    if (shouldDownloadJSON) {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(newReport, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `급여대장결과패키지_${academyName}_${new Date().toISOString().split('T')[0]}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    onBack();
+  };
+
   const renderStep4 = () => {
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto py-8 space-y-8">
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h2 className="text-2xl font-bold text-slate-900">세금 및 최종 급여 확인</h2>
-            <p className="text-slate-500">2026년 법정 이율이 적용된 최종 지급액을 확인하세요.</p>
+            <p className="text-slate-500">지급 수치와 요율 및 공제 방식(3.3%, 4대보험, 커스텀)을 리뷰한 다음 지급 자격 검사를 마무리 하세요.</p>
           </div>
-          <div className="flex gap-4">
-            <button onClick={() => setStep(3)} className="px-4 py-2 text-slate-500 font-medium hover:text-slate-800 transition-colors">이전</button>
-            <button onClick={onBack} className="btn-3d px-8 py-2">
-              완료 및 저장
-              <CheckCircle2 size={18} className="ml-1" />
+          <div className="flex flex-wrap gap-3">
+            <button onClick={() => setStep(3)} className="px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold border border-slate-200 rounded-xl transition-all h-11 flex items-center">이전</button>
+            <button onClick={() => handleSaveAndExit(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition-all h-11 flex items-center gap-2">
+              <CheckCircle2 size={16} />
+              저장 및 완료
+            </button>
+            <button onClick={() => handleSaveAndExit(true)} className="btn-3d px-6 py-2 h-11 flex items-center gap-2">
+              <Download size={16} />
+              급여대장 패키지(.json) 내보내기 & 완료
             </button>
           </div>
         </div>
 
         <div className="grid gap-6">
           {employees.map(emp => {
-            const weeklyHours = getWeeklyHours(emp.id);
-            const holidayAllowance = weeklyHolidayStatus[emp.id]?.[0] !== false ? calculateWeeklyHolidayAllowance(weeklyHours, emp.hourlyWage) : 0;
-            const baseSalary = weeklyHours * emp.hourlyWage;
-            const totalGross = baseSalary + holidayAllowance;
-            
-            let totalDeduction = 0;
-            let deductions: Record<string, number> = {};
-
-            if (emp.taxType === 'FREELANCER') {
-              totalDeduction = totalGross * TAX_RATES_2026.FREELANCER;
-              deductions = { '사업소득세 (3.3%)': totalDeduction };
-            } else {
-              const np = totalGross * TAX_RATES_2026.FOUR_MAJOR.NATIONAL_PENSION;
-              const hi = totalGross * TAX_RATES_2026.FOUR_MAJOR.HEALTH_INSURANCE;
-              const ltc = hi * TAX_RATES_2026.FOUR_MAJOR.LONG_TERM_CARE;
-              const ei = totalGross * TAX_RATES_2026.FOUR_MAJOR.EMPLOYMENT_INSURANCE;
-              
-              deductions = {
-                '국민연금 (4.5%)': np,
-                '건강보험 (3.545%)': hi,
-                '장기요양보험': ltc,
-                '고용보험 (0.9%)': ei,
-              };
-              totalDeduction = Object.values(deductions).reduce((a, b) => a + b, 0);
-            }
-
-            const netSalary = totalGross - totalDeduction;
+            const payroll = computeEmployeePayroll(emp);
+            const activeTax = employeeTaxOverrides[emp.id] || { taxType: emp.taxType, customTaxRate: emp.customTaxRate || 3.3 };
+            const activeAllowances = employeeAllowanceOverrides[emp.id] || {
+              position: 0,
+              qualification: 0,
+              businessPromotion: 0,
+              cashier: 0,
+              meal: 0,
+              other: 0,
+              omitted: 0
+            };
 
             return (
-              <div key={emp.id} className="glass-card p-8 grid md:grid-cols-3 gap-8 relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4">
-                  <span className={cn(
-                    "px-3 py-1 rounded-full text-[10px] font-black uppercase",
-                    emp.taxType === 'FREELANCER' ? "bg-purple-100 text-purple-600" : "bg-blue-100 text-blue-600"
-                  )}>
-                    {emp.taxType === 'FREELANCER' ? '3.3% 프리랜서' : '4대보험 가입'}
-                  </span>
-                </div>
-
-                <div className="space-y-4">
+              <div key={emp.id} className="glass-card p-8 flex flex-col gap-6 relative overflow-hidden">
+                {/* Employee badge header */}
+                <div className="flex flex-wrap justify-between items-center gap-4 border-b border-slate-100 pb-4">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center font-bold text-xl">
                       {emp.name[0]}
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold text-slate-900">{emp.name}</h3>
-                      <p className="text-sm text-slate-500">{emp.position}</p>
+                      <h3 className="text-xl font-bold text-slate-900">{emp.name} <span className="text-xs text-slate-500 font-normal">{emp.position}</span></h3>
+                      <p className="text-xs text-slate-400">주 주민등록 일련 생년정보: {emp.ssn.split('-')[0]}-*******</p>
                     </div>
                   </div>
-                  <div className="pt-4 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500">기본급 ({weeklyHours.toFixed(1)}h)</span>
-                      <span className="font-bold">{formatCurrency(baseSalary)}</span>
+                  
+                  {/* Realtime Tax Selection Controller */}
+                  <div className="flex items-center gap-3 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+                    <span className="text-[11px] font-bold text-slate-500 px-2">정산 세무 방식:</span>
+                    <button
+                      onClick={() => {
+                        setEmployeeTaxOverrides(prev => ({
+                          ...prev,
+                          [emp.id]: { ...prev[emp.id]!, taxType: 'FREELANCER' }
+                        }));
+                      }}
+                      className={cn(
+                        "px-3 py-1 bg-white text-xs font-black rounded-lg transition-all",
+                        activeTax.taxType === 'FREELANCER' ? "bg-purple-600 text-white shadow-md shadow-purple-200" : "bg-transparent text-slate-500"
+                      )}
+                    >
+                      3.3% 프리
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEmployeeTaxOverrides(prev => ({
+                          ...prev,
+                          [emp.id]: { ...prev[emp.id]!, taxType: 'FOUR_MAJOR' }
+                        }));
+                      }}
+                      className={cn(
+                        "px-3 py-1 bg-white text-xs font-black rounded-lg transition-all",
+                        activeTax.taxType === 'FOUR_MAJOR' ? "bg-blue-600 text-white shadow-md shadow-blue-200" : "bg-transparent text-slate-500"
+                      )}
+                    >
+                      4대보험
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEmployeeTaxOverrides(prev => ({
+                          ...prev,
+                          [emp.id]: { ...prev[emp.id]!, taxType: 'CUSTOM' }
+                        }));
+                      }}
+                      className={cn(
+                        "px-3 py-1 bg-white text-xs font-black rounded-lg transition-all",
+                        activeTax.taxType === 'CUSTOM' ? "bg-amber-600 text-white shadow-md shadow-amber-200" : "bg-transparent text-slate-500"
+                      )}
+                    >
+                      커스텀 %
+                    </button>
+
+                    {activeTax.taxType === 'CUSTOM' && (
+                      <div className="flex items-center gap-1 pl-1 border-l border-slate-300 ml-1">
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="100"
+                          value={activeTax.customTaxRate}
+                          onChange={e => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setEmployeeTaxOverrides(prev => ({
+                              ...prev,
+                              [emp.id]: { ...prev[emp.id]!, customTaxRate: val }
+                            }));
+                          }}
+                          className="w-10 text-[11px] font-bold p-0.5 border border-slate-300 rounded text-center bg-white"
+                        />
+                        <span className="text-[10px] font-bold">%</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Grid content columns */}
+                <div className="grid md:grid-cols-3 gap-6">
+                  {/* Earnings Calculation summary */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                      <Coins className="text-blue-500" size={14} />
+                      지급 항목 리스트 (세전)
+                    </h4>
+                    
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">기본근무수당 ({payroll.weeklyHours.toFixed(1)}h)</span>
+                        <span className="font-extrabold text-slate-900">{formatCurrency(payroll.baseSalary)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">주휴수당</span>
+                        <span className="font-extrabold text-blue-600">+{formatCurrency(payroll.holidayAllowance)}</span>
+                      </div>
+                      
+                      {/* Allowances list */}
+                      {payroll.allowancesAmount > 0 && (
+                        <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 space-y-1 text-xs">
+                          {activeAllowances.position ? (
+                            <div className="flex justify-between text-slate-600">
+                              <span>직책수당:</span>
+                              <span className="font-bold">+{formatCurrency(activeAllowances.position)}</span>
+                            </div>
+                          ) : null}
+                          {activeAllowances.qualification ? (
+                            <div className="flex justify-between text-slate-600">
+                              <span>자격수당:</span>
+                              <span className="font-bold">+{formatCurrency(activeAllowances.qualification)}</span>
+                            </div>
+                          ) : null}
+                          {activeAllowances.businessPromotion ? (
+                            <div className="flex justify-between text-slate-600">
+                              <span>업무추진비:</span>
+                              <span className="font-bold">+{formatCurrency(activeAllowances.businessPromotion)}</span>
+                            </div>
+                          ) : null}
+                          {activeAllowances.cashier ? (
+                            <div className="flex justify-between text-slate-600">
+                              <span>출납수당:</span>
+                              <span className="font-bold">+{formatCurrency(activeAllowances.cashier)}</span>
+                            </div>
+                          ) : null}
+                          {activeAllowances.meal ? (
+                            <div className="flex justify-between text-slate-600">
+                              <span>식대(비과세):</span>
+                              <span className="font-bold text-green-600">+{formatCurrency(activeAllowances.meal)}</span>
+                            </div>
+                          ) : null}
+                          {activeAllowances.other ? (
+                            <div className="flex justify-between text-slate-600">
+                              <span>기타수당:</span>
+                              <span className="font-bold">+{formatCurrency(activeAllowances.other)}</span>
+                            </div>
+                          ) : null}
+                          {activeAllowances.omitted ? (
+                            <div className="flex justify-between text-slate-600 text-red-500">
+                              <span>수기 누락금:</span>
+                              <span className="font-bold">+{formatCurrency(activeAllowances.omitted)}</span>
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+
+                      <div className="pt-2 border-t border-slate-100 flex justify-between font-extrabold text-slate-900 text-base">
+                        <span>세전 수령총액</span>
+                        <span>{formatCurrency(payroll.totalGross)}</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500">주휴수당</span>
-                      <span className="font-bold text-blue-600">+{formatCurrency(holidayAllowance)}</span>
+                  </div>
+
+                  {/* Deductions breakdown */}
+                  <div className="bg-slate-50 rounded-2xl p-6 space-y-3">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">원천 징수 공제액 (Deductions)</h4>
+                    {Object.entries(payroll.deductions).map(([name, amount]) => (
+                      <div key={name} className="flex justify-between text-xs">
+                        <span className="text-slate-600 font-semibold">{name}</span>
+                        <span className="text-red-500 font-bold">-{formatCurrency(amount as number)}</span>
+                      </div>
+                    ))}
+                    <div className="pt-2 border-t border-slate-200 flex justify-between font-extrabold text-red-600 text-sm">
+                      <span>공제 합계액</span>
+                      <span>-{formatCurrency(payroll.totalDeduction)}</span>
                     </div>
-                    <div className="pt-2 border-t border-slate-100 flex justify-between font-bold text-slate-900">
-                      <span>세전 총액</span>
-                      <span>{formatCurrency(totalGross)}</span>
+                  </div>
+
+                  {/* Interactive Allowance Editing Fields & Wage button */}
+                  <div className="flex flex-col justify-between items-center md:items-end text-center md:text-right space-y-4">
+                    <div className="space-y-1">
+                      <p className="text-xs font-extrabold text-slate-400 uppercase">예상 매월 실수령액</p>
+                      <p className="text-3xl font-black text-slate-950 tracking-tight">{formatCurrency(payroll.netSalary)}</p>
+                    </div>
+
+                    <div className="w-full space-y-2">
+                      <button
+                        onClick={() => setActivePayslipEmpId(emp.id)}
+                        className="w-full flex items-center justify-center gap-1.5 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200 transition-all shadow-sm"
+                      >
+                        <FileText size={14} className="text-blue-600" />
+                        임금명세서 인쇄 및 PDF 저장
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-slate-50 rounded-2xl p-6 space-y-3">
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">공제 항목 (Deductions)</h4>
-                  {Object.entries(deductions).map(([name, amount]) => (
-                    <div key={name} className="flex justify-between text-sm">
-                      <span className="text-slate-600">{name}</span>
-                      <span className="text-red-500 font-medium">-{formatCurrency(amount)}</span>
+                {/* Inline allowance editor drawer */}
+                <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 mt-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">이 직원만 당일 수당 수작업 조정 및 수기 지급</span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] text-slate-500 block">직책수당</span>
+                      <input
+                        type="number"
+                        value={activeAllowances.position || 0}
+                        onChange={e => {
+                          const val = parseInt(e.target.value) || 0;
+                          setEmployeeAllowanceOverrides(prev => ({
+                            ...prev,
+                            [emp.id]: { ...activeAllowances, position: val }
+                          }));
+                        }}
+                        className="w-full px-2 py-1 bg-white text-xs font-bold text-slate-800 rounded border border-slate-200 text-right"
+                      />
                     </div>
-                  ))}
-                  <div className="pt-2 border-t border-slate-200 flex justify-between font-bold text-red-600">
-                    <span>공제 합계</span>
-                    <span>-{formatCurrency(totalDeduction)}</span>
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] text-slate-500 block">자격수당</span>
+                      <input
+                        type="number"
+                        value={activeAllowances.qualification || 0}
+                        onChange={e => {
+                          const val = parseInt(e.target.value) || 0;
+                          setEmployeeAllowanceOverrides(prev => ({
+                            ...prev,
+                            [emp.id]: { ...activeAllowances, qualification: val }
+                          }));
+                        }}
+                        className="w-full px-2 py-1 bg-white text-xs font-bold text-slate-800 rounded border border-slate-200 text-right"
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] text-slate-500 block">업무추진비</span>
+                      <input
+                        type="number"
+                        value={activeAllowances.businessPromotion || 0}
+                        onChange={e => {
+                          const val = parseInt(e.target.value) || 0;
+                          setEmployeeAllowanceOverrides(prev => ({
+                            ...prev,
+                            [emp.id]: { ...activeAllowances, businessPromotion: val }
+                          }));
+                        }}
+                        className="w-full px-2 py-1 bg-white text-xs font-bold text-slate-800 rounded border border-slate-200 text-right"
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] text-slate-500 block">출납수당</span>
+                      <input
+                        type="number"
+                        value={activeAllowances.cashier || 0}
+                        onChange={e => {
+                          const val = parseInt(e.target.value) || 0;
+                          setEmployeeAllowanceOverrides(prev => ({
+                            ...prev,
+                            [emp.id]: { ...activeAllowances, cashier: val }
+                          }));
+                        }}
+                        className="w-full px-2 py-1 bg-white text-xs font-bold text-slate-800 rounded border border-slate-200 text-right"
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] text-slate-500 block text-green-600 font-bold">식대(비과세)</span>
+                      <input
+                        type="number"
+                        value={activeAllowances.meal || 0}
+                        onChange={e => {
+                          const val = parseInt(e.target.value) || 0;
+                          setEmployeeAllowanceOverrides(prev => ({
+                            ...prev,
+                            [emp.id]: { ...activeAllowances, meal: val }
+                          }));
+                        }}
+                        className="w-full px-2 py-1 bg-white text-xs font-bold text-slate-800 rounded border border-slate-200 text-right"
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] text-slate-500 block">수당(기타)</span>
+                      <input
+                        type="number"
+                        value={activeAllowances.other || 0}
+                        onChange={e => {
+                          const val = parseInt(e.target.value) || 0;
+                          setEmployeeAllowanceOverrides(prev => ({
+                            ...prev,
+                            [emp.id]: { ...activeAllowances, other: val }
+                          }));
+                        }}
+                        className="w-full px-2 py-1 bg-white text-xs font-bold text-slate-800 rounded border border-slate-200 text-right"
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] text-red-500 block font-bold">기 누락금</span>
+                      <input
+                        type="number"
+                        value={activeAllowances.omitted || 0}
+                        onChange={e => {
+                          const val = parseInt(e.target.value) || 0;
+                          setEmployeeAllowanceOverrides(prev => ({
+                            ...prev,
+                            [emp.id]: { ...activeAllowances, omitted: val }
+                          }));
+                        }}
+                        className="w-full px-2 py-1 bg-white text-xs font-bold text-slate-800 rounded border border-slate-200 text-right"
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex flex-col justify-center items-center md:items-end text-center md:text-right space-y-2">
-                  <p className="text-sm font-bold text-slate-400 uppercase">최종 실지급액</p>
-                  <p className="text-4xl font-black text-slate-900 tracking-tight">{formatCurrency(netSalary)}</p>
-                  <button className="mt-4 flex items-center gap-2 text-blue-600 font-bold text-sm hover:underline">
-                    <Download size={16} />
-                    급여명세서 다운로드
-                  </button>
-                </div>
               </div>
             );
           })}
@@ -464,6 +934,22 @@ export default function PayrollCreation({ employees, onBack }: PayrollCreationPr
       {step === 2 && renderStep2()}
       {step === 3 && renderStep3()}
       {step === 4 && renderStep4()}
+
+      {/* Wage Statement Popup Sheet */}
+      {activePayslipEmpId && (() => {
+        const emp = employees.find(e => e.id === activePayslipEmpId);
+        if (!emp) return null;
+        const computed = computeEmployeePayroll(emp);
+        return (
+          <WageStatementSheet
+            employee={emp}
+            calculated={computed}
+            academyName={academyName}
+            onClose={() => setActivePayslipEmpId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
+

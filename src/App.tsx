@@ -7,22 +7,32 @@ import React, { useState, useEffect } from 'react';
 import Main from './views/Main';
 import EmployeeManagement from './views/EmployeeManagement';
 import PayrollCreation from './views/PayrollCreation';
-import { Employee } from './types';
+import { Employee, PayrollReport } from './types';
 
 type View = 'MAIN' | 'EMPLOYEES' | 'PAYROLL';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('MAIN');
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [reports, setReports] = useState<PayrollReport[]>([]);
 
-  // Load employees from localStorage on mount
+  // Load employees & reports from localStorage on mount
   useEffect(() => {
-    const saved = localStorage.getItem('payroll_employees');
-    if (saved) {
+    const savedEmp = localStorage.getItem('payroll_employees');
+    if (savedEmp) {
       try {
-        setEmployees(JSON.parse(saved));
+        setEmployees(JSON.parse(savedEmp));
       } catch (e) {
         console.error('Failed to parse employees', e);
+      }
+    }
+
+    const savedReports = localStorage.getItem('payroll_reports');
+    if (savedReports) {
+      try {
+        setReports(JSON.parse(savedReports));
+      } catch (e) {
+        console.error('Failed to parse reports', e);
       }
     }
   }, []);
@@ -32,6 +42,11 @@ export default function App() {
     localStorage.setItem('payroll_employees', JSON.stringify(employees));
   }, [employees]);
 
+  // Save reports to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('payroll_reports', JSON.stringify(reports));
+  }, [reports]);
+
   const addEmployee = (emp: Employee) => {
     setEmployees(prev => [...prev, emp]);
   };
@@ -40,12 +55,29 @@ export default function App() {
     setEmployees(prev => prev.filter(e => e.id !== id));
   };
 
+  const handleImportEmployees = (imported: Employee[]) => {
+    setEmployees(imported);
+  };
+
+  const handleSaveReport = (newReport: PayrollReport) => {
+    setReports(prev => [newReport, ...prev]);
+  };
+
+  const handleDeleteReport = (reportId: string) => {
+    setReports(prev => prev.filter(r => r.id !== reportId));
+  };
+
   return (
     <div className="min-h-screen font-sans">
       {currentView === 'MAIN' && (
         <Main 
           onCreatePayroll={() => setCurrentView('PAYROLL')} 
           onManageEmployees={() => setCurrentView('EMPLOYEES')} 
+          employees={employees}
+          onImportEmployees={handleImportEmployees}
+          reports={reports}
+          onImportReport={handleSaveReport}
+          onDeleteReport={handleDeleteReport}
         />
       )}
       
@@ -62,6 +94,7 @@ export default function App() {
         <PayrollCreation 
           employees={employees}
           onBack={() => setCurrentView('MAIN')}
+          onSaveReport={handleSaveReport}
         />
       )}
     </div>

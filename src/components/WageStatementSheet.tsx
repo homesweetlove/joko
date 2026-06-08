@@ -1,0 +1,410 @@
+import React from 'react';
+import { format } from 'date-fns';
+import { Printer, X, Download } from 'lucide-react';
+import { Employee, EmployeeAllowances } from '../types';
+import { formatCurrency } from '../lib/utils';
+
+interface WageStatementSheetProps {
+  employee: Employee;
+  calculated: {
+    employeeId: string;
+    name: string;
+    position: string;
+    weeklyHours: number;
+    baseSalary: number;
+    holidayAllowance: number;
+    allowancesAmount: number;
+    itemizedAllowances: EmployeeAllowances;
+    totalGross: number;
+    deductions: Record<string, number>;
+    totalDeduction: number;
+    netSalary: number;
+    taxType: string;
+    customTaxRate?: number;
+    workDaysCount: number;
+    totalMinutes: number;
+    overtimeHours: number;
+    nightHours: number;
+    holidayHours: number;
+  };
+  academyName: string;
+  paydayDateString?: string; 
+  onClose?: () => void;
+}
+
+export default function WageStatementSheet({
+  employee,
+  calculated,
+  academyName,
+  paydayDateString,
+  onClose
+}: WageStatementSheetProps) {
+  
+  const handlePrint = () => {
+    const printContent = document.getElementById('printable-wage-statement');
+    if (!printContent) return;
+    
+    // Create an iframe to print cleanly without changing standard app state
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'absolute';
+    iframe.style.width = '0px';
+    iframe.style.height = '0px';
+    iframe.style.border = 'none';
+    document.body.appendChild(iframe);
+    
+    const doc = iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(`
+        <html>
+          <head>
+            <title>임금명세서 - ${calculated.name}</title>
+            <style>
+              @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+              body {
+                font-family: 'Inter', system-ui, sans-serif;
+                margin: 20px;
+                padding: 0;
+                color: #1e293b;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              .payslip-wrapper {
+                width: 100%;
+                max-width: 800px;
+                margin: 0 auto;
+              }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+                font-size: 13px;
+              }
+              th, td {
+                border: 1px solid #718096;
+                padding: 8px 10px;
+                text-align: center;
+              }
+              .bg-gray-gray {
+                background-color: #cbd5e1 !important;
+                font-weight: bold;
+              }
+              .bg-soft-gray {
+                background-color: #f1f5f9 !important;
+              }
+              .title-box {
+                background-color: #94a3b8 !important;
+                border: 2px solid #475569;
+                padding: 15px;
+                text-align: center;
+                font-size: 24px;
+                font-weight: bold;
+                letter-spacing: 15px;
+                margin-bottom: 20px;
+              }
+              .text-left {
+                text-align: left;
+              }
+              .text-right {
+                text-align: right;
+              }
+              .font-bold {
+                font-weight: bold;
+              }
+              .footer {
+                text-align: center;
+                margin-top: 30px;
+                font-size: 16px;
+                font-weight: bold;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="payslip-wrapper">
+              ${printContent.innerHTML}
+            </div>
+            <script>
+              window.onload = function() {
+                window.print();
+                setTimeout(function() {
+                  window.frameElement.remove();
+                }, 100);
+              }
+            </script>
+          </body>
+        </html>
+      `);
+      doc.close();
+    }
+  };
+
+  // Safe defaults
+  const items = calculated.itemizedAllowances || {};
+  const currentPaydayDay = employee.payday || 10;
+  const payDateDisplay = paydayDateString || `${format(new Date(), 'yyyy년 MM월')} ${currentPaydayDay}일`;
+
+  const workHoursTotal = (calculated.totalMinutes / 60).toFixed(1);
+
+  // Match Excel layout
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[92vh] overflow-hidden flex flex-col border border-slate-200">
+        
+        {/* Modal Header Actions */}
+        <div className="p-4 bg-slate-100 border-b border-slate-200 flex justify-between items-center text-slate-700">
+          <span className="font-bold text-sm text-slate-800 flex items-center gap-2">
+            📄 표준 임금명세서 미리보기 (근로기준법 시행령 제27조의2 준수)
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handlePrint}
+              className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-md"
+            >
+              <Printer size={14} />
+              인쇄하기 / PDF 저장
+            </button>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="p-1 px-2.5 bg-slate-200 hover:bg-slate-300 rounded-lg text-slate-600 font-bold text-sm transition-all"
+              >
+                닫기
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Scrollable Document Container */}
+        <div className="flex-1 overflow-y-auto p-8 bg-slate-50">
+          
+          {/* Printable Layout Match Screen & Paper */}
+          <div 
+            id="printable-wage-statement" 
+            className="bg-white border-2 border-slate-300 p-8 max-w-2xl mx-auto shadow-sm text-slate-800"
+          >
+            {/* Title banner */}
+            <div className="bg-slate-400 border border-slate-600 text-center text-slate-900 py-3 font-extrabold text-2xl tracking-[1.5rem] uppercase mb-4 shadow-sm">
+              임금명세서
+            </div>
+
+            {/* Payday date row */}
+            <div className="text-right text-xs font-bold text-slate-700 mb-2">
+              지급일: <span className="underline decoration-slate-400 underline-offset-4">{payDateDisplay}</span>
+            </div>
+
+            {/* General Metadata Excel Grid */}
+            <table className="w-full border-collapse mb-4 border border-slate-400 text-xs">
+              <tbody>
+                <tr>
+                  <td className="bg-slate-300 border border-slate-400 font-extrabold w-[15%] text-slate-900">성명</td>
+                  <td className="border border-slate-400 w-[35%] font-bold text-left px-3">{calculated.name}</td>
+                  <td className="bg-slate-300 border border-slate-400 font-extrabold w-[15%] text-slate-900">생년월일</td>
+                  <td className="border border-slate-400 w-[35%] font-bold text-left px-3">{employee.ssn ? employee.ssn.split('-')[0] : '대체'}</td>
+                </tr>
+                <tr>
+                  <td className="bg-slate-300 border border-slate-400 font-extrabold text-slate-900">부서</td>
+                  <td className="border border-slate-400 font-bold text-left px-3">{academyName}</td>
+                  <td className="bg-slate-300 border border-slate-400 font-extrabold text-slate-900">직급</td>
+                  <td className="border border-slate-400 font-bold text-left px-3">{calculated.position}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* Detailed Breakdown Banner */}
+            <div className="bg-slate-300 border border-slate-400 border-b-0 text-center py-1.5 font-extrabold text-sm text-slate-900">
+              세부내역
+            </div>
+
+            {/* Side-by-Side Earnings and Deductions Table */}
+            <table className="w-full border-collapse mb-4 border border-slate-400 text-xs shadow-sm">
+              <thead>
+                <tr className="bg-slate-200">
+                  <th colSpan={2} className="border border-slate-400 text-center font-extrabold text-slate-950 py-1.5 w-1/2">지급내역</th>
+                  <th colSpan={2} className="border border-slate-400 text-center font-extrabold text-slate-950 py-1.5 w-1/2">공제내역</th>
+                </tr>
+                <tr className="bg-slate-100 font-bold">
+                  <td className="border border-slate-400 text-center py-1 font-extrabold">임금항목</td>
+                  <td className="border border-slate-400 text-center font-extrabold">지급금액(원)</td>
+                  <td className="border border-slate-400 text-center font-extrabold">공제항목</td>
+                  <td className="border border-slate-400 text-center font-extrabold">공제금액(원)</td>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">기본급</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono font-bold">{calculated.baseSalary.toLocaleString()}</td>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">소득세</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono font-bold">
+                    {(calculated.deductions['소득세 (3.0%)'] || calculated.deductions[`소득세 (${calculated.customTaxRate}%)`] || 0).toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">주휴수당</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono font-bold text-blue-600">{calculated.holidayAllowance.toLocaleString()}</td>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">지방소득세</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono font-bold">
+                    {(calculated.deductions['지방소득세 (0.3%)'] || calculated.deductions['지방소득세 (10%)'] || 0).toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">직책수당</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">{items.position ? items.position.toLocaleString() : '-'}</td>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">건강보험</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">
+                    {calculated.deductions['건강보험 (3.545%)'] ? calculated.deductions['건강보험 (3.545%)'].toLocaleString() : '-'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">자격수당</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">{items.qualification ? items.qualification.toLocaleString() : '-'}</td>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">장기요양보험</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">
+                    {calculated.deductions['장기요양보험'] ? calculated.deductions['장기요양보험'].toLocaleString() : '-'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">업무추진비</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">{items.businessPromotion ? items.businessPromotion.toLocaleString() : '-'}</td>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">국민연금</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">
+                    {calculated.deductions['국민연금 (4.5%)'] ? calculated.deductions['국민연금 (4.5%)'].toLocaleString() : '-'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">출납수당</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">{items.cashier ? items.cashier.toLocaleString() : '-'}</td>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">고용보험</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">
+                    {calculated.deductions['고용보험 (0.9%)'] ? calculated.deductions['고용보험 (0.9%)'].toLocaleString() : '-'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">식대(비과세)</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono text-green-600">{items.meal ? items.meal.toLocaleString() : '-'}</td>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">-</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">-</td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">수당(기타)</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">{items.other ? items.other.toLocaleString() : '-'}</td>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">-</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">-</td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">누락금</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono text-red-500">{items.omitted ? items.omitted.toLocaleString() : '-'}</td>
+                  <td className="border border-slate-400 text-center font-semibold bg-slate-50">-</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono">-</td>
+                </tr>
+                {/* Total row */}
+                <tr className="bg-slate-200 font-extrabold">
+                  <td className="border border-slate-400 text-center py-2 text-slate-900">지급액 계</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono text-slate-950 font-black">{calculated.totalGross.toLocaleString()}</td>
+                  <td className="border border-slate-400 text-center text-slate-900">공제액 계</td>
+                  <td className="border border-slate-400 text-right px-3 font-mono text-red-700 font-black">{calculated.totalDeduction.toLocaleString()}</td>
+                </tr>
+                {/* Net payment row */}
+                <tr className="bg-slate-300 font-extrabold">
+                  <td colSpan={2} className="border border-slate-400 text-center py-2.5 text-base text-slate-900">실수령액(원)</td>
+                  <td colSpan={2} className="border border-slate-400 text-right px-4 text-lg font-black text-blue-700 font-mono">{calculated.netSalary.toLocaleString()}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* Attendance Status Section */}
+            <div className="bg-slate-300 border border-slate-400 border-b-0 text-center py-1.5 font-extrabold text-xs text-slate-900">
+              근무현황 (정산 기간 중 집계)
+            </div>
+            <table className="w-full border-collapse mb-4 border border-slate-400 text-xs">
+              <thead>
+                <tr className="bg-slate-200">
+                  <th className="border border-slate-400 text-center py-1 font-extrabold w-[20%]">근로일수</th>
+                  <th className="border border-slate-400 text-center font-extrabold w-[20%]">총근로시간</th>
+                  <th className="border border-slate-400 text-center font-extrabold w-[20%]">연장근로시간</th>
+                  <th className="border border-slate-400 text-center font-extrabold w-[20%]">야간근로시간</th>
+                  <th className="border border-slate-400 text-center font-extrabold w-[20%]">휴일근로시간</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="font-bold">
+                  <td className="border border-slate-400 text-center py-1.5">{calculated.workDaysCount}일</td>
+                  <td className="border border-slate-400 text-center font-mono">{workHoursTotal}시간</td>
+                  <td className="border border-slate-400 text-center font-mono text-amber-600">{calculated.overtimeHours.toFixed(1)}시간</td>
+                  <td className="border border-slate-400 text-center font-mono text-violet-600">{calculated.nightHours.toFixed(1)}시간</td>
+                  <td className="border border-slate-400 text-center font-mono text-blue-600">{calculated.holidayHours.toFixed(1)}시간</td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* Work Method Formulas Section */}
+            <div className="bg-slate-300 border border-slate-400 border-b-0 text-center py-1.5 font-extrabold text-xs text-slate-900">
+              계산 방법 (수당 및 공제 산출 상세 내역)
+            </div>
+            <table className="w-full border-collapse border border-slate-400 text-[11px] leading-relaxed">
+              <thead>
+                <tr className="bg-slate-200 text-center font-extrabold">
+                  <td className="border border-slate-400 py-1 font-bold w-[25%]">구분</td>
+                  <td className="border border-slate-400 font-bold w-[55%]">산출방법</td>
+                  <td className="border border-slate-400 font-bold w-[20%]">지급액(원)</td>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center">연장근로수당</td>
+                  <td className="border border-slate-400 text-left px-3">
+                    {calculated.overtimeHours > 0 
+                      ? `연장근로 ${calculated.overtimeHours.toFixed(1)}시간 × 시급 ${employee.hourlyWage.toLocaleString()}원 × 1.5`
+                      : '연장 근로 8시간 초과 누적분 없음'}
+                  </td>
+                  <td className="border border-slate-400 text-right px-3 font-mono font-bold">
+                    {Math.round(calculated.overtimeHours * employee.hourlyWage * 1.5).toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center">야간근로수당</td>
+                  <td className="border border-slate-400 text-left px-3">
+                    {calculated.nightHours > 0 
+                      ? `야간근로(22:00 ~ 06:00) ${calculated.nightHours.toFixed(1)}시간 × 시급 ${employee.hourlyWage.toLocaleString()}원 × 0.5`
+                      : '야간근무(22시~익일06시) 집계분 없음'}
+                  </td>
+                  <td className="border border-slate-400 text-right px-3 font-mono font-bold">
+                    {Math.round(calculated.nightHours * employee.hourlyWage * 0.5).toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center">휴일근로수당</td>
+                  <td className="border border-slate-400 text-left px-3">
+                    {calculated.holidayHours > 0 
+                      ? `휴일 및 지정주휴 근무 ${calculated.holidayHours.toFixed(1)}시간 × 시급 ${employee.hourlyWage.toLocaleString()}원`
+                      : '토/일 및 법정주휴일 근무 내역 없음'}
+                  </td>
+                  <td className="border border-slate-400 text-right px-3 font-mono font-bold">
+                    {Math.round(calculated.holidayHours * employee.hourlyWage).toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center">주휴수당 산출</td>
+                  <td className="border border-slate-400 text-left px-3">
+                    {calculated.weeklyHours >= 15 
+                      ? `주간 근로시간: ${calculated.weeklyHours.toFixed(1)}h (15h 이상 발생 충족) / 40 × 8 × 시급`
+                      : '1주 근무시간 15시간 미만으로 주휴수당 미해당'}
+                  </td>
+                  <td className="border border-slate-400 text-right px-3 font-mono font-bold text-blue-600">
+                    {calculated.holidayAllowance.toLocaleString()}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* Bottom Credit Block */}
+            <div className="text-center font-bold text-slate-800 border-2 border-dashed border-slate-300 rounded-lg py-4 mt-6 text-sm">
+              위 원천징수 및 근태 산정 보고서는 근로기준법 시행령 제27조의2에 근거하여 작성된 정식 임금명세서입니다.
+              <br />
+              <span className="text-slate-500 font-bold mt-2 inline-block text-xs">작성 학원명: &ldquo;{academyName}&rdquo; &bull; 발행대행: AI Studio 최적화 자동 헬퍼</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

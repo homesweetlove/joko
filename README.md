@@ -1,9 +1,20 @@
-## 조교(직원)급여를 관리하는 시스템 ##
-> 해당 프로그램에서 직원의 정보를 기입하고 급여를 관리할 수 있다.
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+</div>
 
-# 해당 프로그램은 로컬에서만 작용하는 것으로 개인정보를 활용하지 않습니다.
-> 로컬이란 현재 사이트를 이용하는 대상자의 컴퓨터에 쿠키나 로그를 지우지 않는다면 기록이 남습니다
-> 쉽게 사이트에 로그인을 할때 기존에 썻던 아이디가 보이는거와 동일한 매커니즘 입니다.
+# Run and deploy your AI Studio app
 
-#해당 사이트는 api를 연결할 수 있으며, ".env"의 api관리 모듈이 공개적으로 올라와있습니다.
-> 물론 api를 미기재해도 작동하며, 해당 레포리지에 실제 api는 ".env"에 기재되어 있지는 않습니다.
+This contains everything you need to run your app locally.
+
+View your app in AI Studio: https://ai.studio/apps/c2aa1b57-99ad-4987-93b1-11dfb430ab67
+
+## Run Locally
+
+**Prerequisites:**  Node.js
+
+
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`
