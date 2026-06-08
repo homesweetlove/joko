@@ -544,18 +544,18 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
                 </div>
 
                 {/* Daily Work Logs Table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
+                <div className="overflow-x-auto border border-slate-150 rounded-xl">
+                  <table className="w-full min-w-[1050px] text-left border-collapse text-xs">
                     <thead>
                       <tr className="bg-slate-100 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-150">
-                        <th className="px-6 py-4">날짜</th>
-                        <th className="px-6 py-4">출근</th>
-                        <th className="px-6 py-4">퇴근</th>
-                        <th className="px-6 py-4">휴게</th>
-                        <th className="px-6 py-4">실근무</th>
-                        <th className="px-6 py-4">추가유형</th>
-                        <th className="px-6 py-4">상태</th>
-                        <th className="px-6 py-4">당일 급여 (예상)</th>
+                        <th className="px-6 py-4 whitespace-nowrap">날짜</th>
+                        <th className="px-6 py-4 whitespace-nowrap">출근</th>
+                        <th className="px-6 py-4 whitespace-nowrap">퇴근</th>
+                        <th className="px-6 py-4 whitespace-nowrap">휴게</th>
+                        <th className="px-6 py-4 whitespace-nowrap">실근무</th>
+                        <th className="px-6 py-4 whitespace-nowrap">추가유형</th>
+                        <th className="px-6 py-4 whitespace-nowrap">상태</th>
+                        <th className="px-6 py-4 whitespace-nowrap">당일 급여 (예상)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -571,10 +571,10 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
                         })();
                         return (
                           <tr key={record.date} className="hover:bg-slate-50/50 transition-colors border-b border-slate-100">
-                            <td className="px-6 py-4 font-semibold text-slate-700">
+                            <td className="px-6 py-4 font-semibold text-slate-700 whitespace-nowrap">
                               {format(parse(record.date, 'yyyy-MM-dd', new Date()), 'MM/dd (eee)', { locale: ko })}
                             </td>
-                            <td className="px-6 py-4 min-w-[130px]">
+                            <td className="px-6 py-4 min-w-[130px] whitespace-nowrap">
                               {(() => {
                                 const std = getStandardHoursForRecord(emp, record);
                                 const displayIn = record.isPaidLeave ? std.start : (record.clockIn || '');
@@ -595,7 +595,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
                                 );
                               })()}
                             </td>
-                            <td className="px-6 py-4 min-w-[130px]">
+                            <td className="px-6 py-4 min-w-[130px] whitespace-nowrap">
                               {(() => {
                                 const std = getStandardHoursForRecord(emp, record);
                                 const displayOut = record.isPaidLeave ? std.end : (record.clockOut || '');
@@ -616,28 +616,28 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
                                 );
                               })()}
                             </td>
-                            <td className="px-6 py-4">
+                            <td className="px-6 py-4 whitespace-nowrap">
                               <button 
                                 onClick={() => toggleBreak(emp.id, record.date)}
                                 className={cn(
-                                  "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all",
+                                  "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all whitespace-nowrap",
                                   record.hasBreak ? "bg-orange-100 text-orange-600 border border-orange-200" : "bg-slate-100 text-slate-400 border border-slate-200"
                                 )}
                               >
                                 {record.hasBreak ? 'Break Y' : 'Break N'}
                               </button>
                             </td>
-                            <td className="px-6 py-4 font-extrabold text-slate-900 font-mono">
+                            <td className="px-6 py-4 font-extrabold text-slate-900 font-mono whitespace-nowrap">
                               {formatWorkTime(hours)}
                             </td>
-                            <td className="px-6 py-4">
+                            <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex gap-1">
                                 <button
                                   onClick={() => {
                                     setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, isHolidayWork: !r.isHolidayWork } : r));
                                   }}
                                   className={cn(
-                                    "px-2 py-1 rounded-lg text-[10px] font-black transition-all border",
+                                    "px-2 py-1 rounded-lg text-[10px] font-black transition-all border whitespace-nowrap",
                                     record.isHolidayWork 
                                       ? "bg-red-500 text-white border-red-650 shadow-xs" 
                                       : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
@@ -650,7 +650,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
                                     setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, isPaidLeave: !r.isPaidLeave, isAbsence: !r.isPaidLeave ? false : r.isAbsence } : r));
                                   }}
                                   className={cn(
-                                    "px-2 py-1 rounded-lg text-[10px] font-black transition-all border",
+                                    "px-2 py-1 rounded-lg text-[10px] font-black transition-all border whitespace-nowrap",
                                     record.isPaidLeave 
                                       ? "bg-purple-600 text-white border-purple-700 shadow-xs" 
                                       : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
@@ -660,18 +660,18 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
                                 </button>
                               </div>
                             </td>
-                            <td className="px-6 py-4">
+                            <td className="px-6 py-4 whitespace-nowrap min-w-[100px]">
                               {record.isPaidLeave ? (
-                                <span className="px-2.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-black rounded-full border border-purple-200">유급연차</span>
+                                <span className="px-2.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-black rounded-full border border-purple-200 inline-block whitespace-nowrap">유급연차</span>
                               ) : record.isAbsence ? (
-                                <span className="px-2.5 py-0.5 bg-red-100 text-red-600 text-[10px] font-black rounded-full border border-red-200">결석</span>
+                                <span className="px-2.5 py-0.5 bg-red-100 text-red-600 text-[10px] font-black rounded-full border border-red-200 inline-block whitespace-nowrap">결석</span>
                               ) : (
-                                <span className="px-2.5 py-0.5 bg-green-100 text-green-600 text-[10px] font-black rounded-full border border-green-200">정상</span>
+                                <span className="px-2.5 py-0.5 bg-green-100 text-green-600 text-[10px] font-black rounded-full border border-green-200 inline-block whitespace-nowrap">정상</span>
                               )}
                             </td>
-                            <td className="px-6 py-4">
+                            <td className="px-6 py-4 whitespace-nowrap min-w-[120px]">
                               <span className={cn(
-                                "font-extrabold font-mono text-xs tracking-tight",
+                                "font-extrabold font-mono text-xs tracking-tight whitespace-nowrap",
                                 record.isPaidLeave ? "text-purple-600" :
                                 record.isHolidayWork ? "text-red-500" :
                                 dailyWage > 0 ? "text-slate-800" : "text-slate-400"
