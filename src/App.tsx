@@ -87,6 +87,7 @@ export default function App() {
           onAddEmployee={addEmployee}
           onDeleteEmployee={deleteEmployee}
           onBack={() => setCurrentView('MAIN')}
+          onImportEmployees={handleImportEmployees}
         />
       )}
 

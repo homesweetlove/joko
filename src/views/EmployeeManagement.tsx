@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Trash2, Edit2, Save, X, UserPlus, Calendar, Clock, CreditCard, Users } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, UserPlus, Calendar, Clock, CreditCard, Users, Download, Upload, Check } from 'lucide-react';
 import { Employee, DayOfWeek } from '../types';
 import { DAYS_OF_WEEK, WORK_DAYS } from '../constants';
 import { cn } from '../lib/utils';
@@ -10,9 +10,12 @@ interface EmployeeManagementProps {
   onAddEmployee: (employee: Employee) => void;
   onDeleteEmployee: (id: string) => void;
   onBack: () => void;
+  onImportEmployees: (employees: Employee[]) => void;
 }
 
-export default function EmployeeManagement({ employees, onAddEmployee, onDeleteEmployee, onBack }: EmployeeManagementProps) {
+export default function EmployeeManagement({ employees, onAddEmployee, onDeleteEmployee, onBack, onImportEmployees }: EmployeeManagementProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [successMsg, setSuccessMsg] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [newEmployee, setNewEmployee] = useState<Partial<Employee>>({
     name: '',
@@ -80,6 +83,42 @@ export default function EmployeeManagement({ employees, onAddEmployee, onDeleteE
     }
   };
 
+  const handleExport = () => {
+    if (employees.length === 0) {
+      alert("백업할 조교 데이터가 없습니다. 먼저 조교를 등록해주세요!");
+      return;
+    }
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(employees, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `조교급여대장_백업_${new Date().toISOString().split('T')[0]}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const parsed = JSON.parse(evt.target?.result as string);
+        if (Array.isArray(parsed) && parsed.every(item => item.id && item.name)) {
+          onImportEmployees(parsed);
+          setSuccessMsg(true);
+          setTimeout(() => setSuccessMsg(false), 3000);
+        } else {
+          alert("올바르지 않은 백업 파일 형식입니다.");
+        }
+      } catch (err) {
+        alert("파일을 읽는 중 에러가 발생했습니다: " + err);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
@@ -98,6 +137,55 @@ export default function EmployeeManagement({ employees, onAddEmployee, onDeleteE
             <UserPlus className="w-5 h-5 mr-2" />
             조교 추가
           </button>
+        </div>
+      </div>
+
+      {/* Backup & Import Session Section */}
+      <div className="bg-slate-50 border border-slate-150 rounded-2xl p-6 mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h3 className="font-bold text-slate-800 flex items-center gap-2">
+            <Users size={18} className="text-blue-600" />
+            직원 데이터 가져오기 & 백업 내보내기
+          </h3>
+          <p className="text-xs text-slate-500">
+            기기가 바뀌거나 데이터를 보관하고 싶을 때 조교 리스트를 안전하게 가져오거나 백업 파일(.json)로 저장할 수 있습니다.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3 items-center">
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-800 text-sm font-bold border border-slate-200 rounded-xl transition-all shadow-xs cursor-pointer"
+          >
+            <Download size={14} className="text-slate-600" />
+            직원 데이터 백업
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl transition-all shadow-md cursor-pointer"
+          >
+            <Upload size={14} className="text-emerald-400" />
+            백업 파일 가져오기
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImport}
+            accept=".json"
+            className="hidden"
+          />
+          <AnimatePresence>
+            {successMsg && (
+              <motion.span
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0 }}
+                className="text-xs font-black text-emerald-600 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-xl flex items-center gap-1"
+              >
+                <Check size={12} />
+                데이터 복원 성공!
+              </motion.span>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
