@@ -555,11 +555,20 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
                         <th className="px-6 py-4">실근무</th>
                         <th className="px-6 py-4">추가유형</th>
                         <th className="px-6 py-4">상태</th>
+                        <th className="px-6 py-4">당일 급여 (예상)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {empRecords.map(record => {
                         const hours = calculateHours(record);
+                        const dailyWage = (() => {
+                          if (record.isAbsence && !record.isPaidLeave) return 0;
+                          let rate = 1.0;
+                          if (record.isHolidayWork && !record.isPaidLeave) {
+                            rate = 1.5;
+                          }
+                          return Math.floor(hours * emp.hourlyWage * rate);
+                        })();
                         return (
                           <tr key={record.date} className="hover:bg-slate-50/50 transition-colors border-b border-slate-100">
                             <td className="px-6 py-4 font-semibold text-slate-700">
@@ -659,6 +668,16 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
                               ) : (
                                 <span className="px-2.5 py-0.5 bg-green-100 text-green-600 text-[10px] font-black rounded-full border border-green-200">정상</span>
                               )}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={cn(
+                                "font-extrabold font-mono text-xs tracking-tight",
+                                record.isPaidLeave ? "text-purple-600" :
+                                record.isHolidayWork ? "text-red-500" :
+                                dailyWage > 0 ? "text-slate-800" : "text-slate-400"
+                              )}>
+                                {dailyWage > 0 ? `${dailyWage.toLocaleString()}원` : '-'}
+                              </span>
                             </td>
                           </tr>
                         );
