@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Employee, AttendanceRecord, PayrollStep, PayrollReport, EmployeeAllowances } from '../types';
 import { TAX_RATES_2026 } from '../constants';
-import { cn, formatCurrency, calculateWeeklyHolidayAllowance, calculateNightHours } from '../lib/utils';
+import { cn, formatCurrency, calculateWeeklyHolidayAllowance, calculateNightHours, normalizeTimeToHHMM } from '../lib/utils';
 import { format, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, parse, differenceInMinutes, isValid } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import * as XLSX from 'xlsx';
@@ -115,13 +115,16 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
           formattedDate = String(dateStr).trim();
         }
 
+        const parsedIn = normalizeTimeToHHMM(clockIn);
+        const parsedOut = normalizeTimeToHHMM(clockOut);
+
         parsedRecords.push({
           employeeId: employee.id,
           date: formattedDate,
-          clockIn: clockIn && clockIn !== '-' ? String(clockIn).trim() : undefined,
-          clockOut: clockOut && clockOut !== '-' ? String(clockOut).trim() : undefined,
+          clockIn: parsedIn,
+          clockOut: parsedOut,
           hasBreak: false,
-          isAbsence: !clockIn || clockIn === '-',
+          isAbsence: !parsedIn || !parsedOut || clockIn === '-',
         });
       });
 
@@ -243,167 +246,462 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
     </motion.div>
   );
 
-  const renderStep3 = () => (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto py-8 space-y-8">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">출퇴근 및 주휴수당 확인</h2>
-          <p className="text-slate-500">각 주차별 근무 시간과 주휴수당 지급 여부를 확인하세요.</p>
-        </div>
-        <div className="flex gap-4">
-          <button 
-            onClick={applyAllBreaks}
-            className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-2"
-          >
-            <Coffee size={16} className="text-orange-500" />
-            일괄 휴게 적용
-          </button>
-          <button onClick={() => setStep(4)} className="btn-3d px-8 py-2">
-            다음 단계
-            <ChevronRight size={18} className="ml-1" />
-          </button>
-        </div>
-      </div>
+  const getWeeksList = () => {
+    const weeksMap: Record<string, { start: Date; end: Date; label: string }> = {};
+    attendance.forEach(record => {
+      try {
+        const d = parse(record.date, 'yyyy-MM-dd', new Date());
+        if (!isValid(d)) return;
+        const start = startOfWeek(d, { weekStartsOn: 1 });
+        const end = endOfWeek(d, { weekStartsOn: 1 });
+        const key = format(start, 'yyyy-MM-dd');
+        if (!weeksMap[key]) {
+          weeksMap[key] = {
+            start,
+            end,
+            label: `${format(start, 'M/d')} ~ ${format(end, 'M/d')}`
+          };
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
 
-      <div className="space-y-6">
-        {employees.map(emp => {
-          const weeklyHours = getWeeklyHours(emp.id);
-          const holidayAllowance = calculateWeeklyHolidayAllowance(weeklyHours, emp.hourlyWage);
-          const isEligible = weeklyHours >= 15;
+    return Object.keys(weeksMap)
+      .sort()
+      .map(key => ({
+        key,
+        ...weeksMap[key]
+      }));
+  };
 
-          return (
-            <div key={emp.id} className="glass-card overflow-hidden">
-              <div className="p-6 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">
-                    {emp.name[0]}
+  const getScheduledHours = (emp: Employee, dateStr: string) => {
+    try {
+      const d = parse(dateStr, 'yyyy-MM-dd', new Date());
+      const daysStr = ['일', '월', '화', '수', '목', '금', '토'] as const;
+      const korDay = daysStr[d.getDay()];
+      const sched = emp.standardWorkHours?.[korDay as any];
+      if (sched && sched.start && sched.end) {
+        const start = parse(sched.start, 'HH:mm', new Date());
+        const end = parse(sched.end, 'HH:mm', new Date());
+        return Math.max(0, differenceInMinutes(end, start) / 60);
+      }
+    } catch (e) {
+      // ignore
+    }
+    return 8; // fallback to 8 hours
+  };
+
+  const getWeeklyHoursForEmployee = (empId: string, weekKey: string, attRecords: AttendanceRecord[]) => {
+    let totalHours = 0;
+    attRecords.forEach(r => {
+      if (r.employeeId !== empId) return;
+      try {
+        const d = parse(r.date, 'yyyy-MM-dd', new Date());
+        const start = startOfWeek(d, { weekStartsOn: 1 });
+        const currentWeekKey = format(start, 'yyyy-MM-dd');
+        if (currentWeekKey === weekKey) {
+          if (!r.isAbsence) {
+            totalHours += calculateHours(r);
+          } else if (r.isPaidLeave) {
+            const employee = employees.find(e => e.id === empId);
+            if (employee) {
+              totalHours += getScheduledHours(employee, r.date);
+            }
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
+    return totalHours;
+  };
+
+  const formatWorkTime = (hoursFloat: number) => {
+    const totalMinutes = Math.round(hoursFloat * 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `${String(h).padStart(2, '0')}시간 ${String(m).padStart(2, '0')}분`;
+  };
+
+  const renderStep3 = () => {
+    const weeks = getWeeksList();
+
+    return (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto py-8 space-y-8 animate-fade-in">
+        <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <div>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">출퇴근 및 주휴수당 확인</h2>
+            <p className="text-sm text-slate-500">각 주차별 소정근로 시간과 주휴수당 여부를 개별 설정 및 일괄 조정하세요.</p>
+          </div>
+          <div className="flex gap-3">
+            <button 
+              onClick={applyAllBreaks}
+              className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-1.5 shadow-sm"
+            >
+              <Coffee size={14} className="text-orange-500" />
+              일괄 휴게 적용
+            </button>
+            <button onClick={() => setStep(4)} className="btn-3d px-8 py-2 text-xs font-bold flex items-center gap-1 bg-blue-600 text-white rounded-xl shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">
+              다음 단계로 이동
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-8">
+          {employees.map(emp => {
+            const empRecords = attendance.filter(r => r.employeeId === emp.id);
+            let totalHoursWorked = 0;
+            let estHolidayAllowance = 0;
+
+            weeks.forEach(week => {
+              const wHours = getWeeklyHoursForEmployee(emp.id, week.key, attendance);
+              const isAutoEligible = wHours >= 15;
+              const currentSetting = weeklyHolidayStatus[emp.id]?.[week.key] || 'AUTO';
+              const isPaid = currentSetting === 'YES' || (currentSetting === 'AUTO' && isAutoEligible);
+              if (isPaid) {
+                estHolidayAllowance += calculateWeeklyHolidayAllowance(wHours, emp.hourlyWage);
+              }
+              totalHoursWorked += wHours;
+            });
+
+            return (
+              <div key={emp.id} className="glass-card overflow-hidden bg-white rounded-2xl shadow-sm border border-slate-150">
+                {/* Employee Profile Header */}
+                <div className="p-6 bg-slate-50 border-b border-slate-150 flex flex-wrap justify-between items-center gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-lg shadow-md shadow-blue-100">
+                      {emp.name[0]}
+                    </div>
+                    <div>
+                      <div className="flex items-baseline gap-2">
+                        <h3 className="font-extrabold text-slate-900 text-lg">{emp.name}</h3>
+                        <span className="text-xs bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded-full border border-blue-100">{emp.position}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5 font-semibold">시급: <span className="font-mono">{emp.hourlyWage.toLocaleString()}원</span></p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-bold text-slate-900">{emp.name} <span className="text-slate-400 font-medium text-sm ml-1">{emp.position}</span></h3>
-                    <p className="text-xs text-slate-500">시급: {emp.hourlyWage.toLocaleString()}원</p>
+
+                  <div className="flex flex-wrap items-center gap-6">
+                    <div className="text-right border-r border-slate-200 pr-6">
+                      <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">정산 대상 총근로</p>
+                      <p className="text-lg font-black text-slate-800 font-mono mt-0.5">{formatWorkTime(totalHoursWorked)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">주휴수당 합산</p>
+                      <p className={cn("text-lg font-black font-mono mt-0.5", estHolidayAllowance > 0 ? "text-blue-600" : "text-slate-400")}>
+                        {estHolidayAllowance > 0 ? formatCurrency(estHolidayAllowance) : '0원'}
+                      </p>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-8">
-                  <div className="text-right">
-                    <p className="text-xs font-bold text-slate-400 uppercase">주간 근무시간</p>
-                    <p className="text-xl font-black text-slate-900">{weeklyHours.toFixed(1)}h</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs font-bold text-slate-400 uppercase">주휴수당 (예상)</p>
-                    <p className={cn("text-xl font-black", isEligible ? "text-blue-600" : "text-slate-300")}>
-                      {isEligible ? formatCurrency(holidayAllowance) : '대상 아님'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200">
-                    <span className="text-xs font-bold text-slate-500 ml-2">지급 여부</span>
-                    <button 
-                      onClick={() => setWeeklyHolidayStatus(prev => ({
-                        ...prev,
-                        [emp.id]: { ...prev[emp.id], 0: !prev[emp.id]?.[0] }
-                      }))}
-                      className={cn(
-                        "px-4 py-1 rounded-lg text-xs font-bold transition-all",
-                        weeklyHolidayStatus[emp.id]?.[0] !== false ? "bg-blue-600 text-white shadow-lg shadow-blue-200" : "bg-slate-100 text-slate-400"
-                      )}
-                    >
-                      Y
-                    </button>
-                    <button 
-                      onClick={() => setWeeklyHolidayStatus(prev => ({
-                        ...prev,
-                        [emp.id]: { ...prev[emp.id], 0: false }
-                      }))}
-                      className={cn(
-                        "px-4 py-1 rounded-lg text-xs font-bold transition-all",
-                        weeklyHolidayStatus[emp.id]?.[0] === false ? "bg-red-600 text-white shadow-lg shadow-red-200" : "bg-slate-100 text-slate-400"
-                      )}
-                    >
-                      N
-                    </button>
-                  </div>
-                </div>
-              </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-white text-slate-400 text-xs font-bold uppercase tracking-wider">
-                      <th className="px-6 py-4 border-b border-slate-100">날짜</th>
-                      <th className="px-6 py-4 border-b border-slate-100">출근</th>
-                      <th className="px-6 py-4 border-b border-slate-100">퇴근</th>
-                      <th className="px-6 py-4 border-b border-slate-100">휴게</th>
-                      <th className="px-6 py-4 border-b border-slate-100">실근무</th>
-                      <th className="px-6 py-4 border-b border-slate-100">상태</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {attendance.filter(r => r.employeeId === emp.id).map(record => {
-                      const hours = calculateHours(record);
+                {/* Week-by-week Holiday Allowance Controls */}
+                <div className="p-6 bg-slate-50/50 border-b border-slate-150 space-y-4">
+                  <div className="flex flex-wrap justify-between items-center gap-3">
+                    <div>
+                      <span className="font-bold text-xs text-slate-700 block uppercase tracking-tight">주차별 주휴수당 지급 설정</span>
+                      <span className="text-[11px] text-slate-500">아래 주차 카드의 선택지를 활용해 개별 지급 방식을 변경하거나 우측의 일괄 지정 버튼을 활용하세요.</span>
+                    </div>
+                    
+                    {/* Bulk Action Pills */}
+                    <div className="flex gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+                      <button
+                        onClick={() => {
+                          const updated: Record<string, string> = {};
+                          weeks.forEach(w => { updated[w.key] = 'YES'; });
+                          setWeeklyHolidayStatus(prev => ({ ...prev, [emp.id]: updated }));
+                        }}
+                        className="px-3 py-1 bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 text-[10px] font-black rounded-lg transition-all shadow-sm"
+                      >
+                        주휴 일괄 지급(Y)
+                      </button>
+                      <button
+                        onClick={() => {
+                          const updated: Record<string, string> = {};
+                          weeks.forEach(w => { updated[w.key] = 'NO'; });
+                          setWeeklyHolidayStatus(prev => ({ ...prev, [emp.id]: updated }));
+                        }}
+                        className="px-3 py-1 bg-white hover:bg-red-50 text-red-650 border border-slate-200 text-[10px] font-black rounded-lg transition-all shadow-sm"
+                      >
+                        주휴 일괄 미지급(N)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setWeeklyHolidayStatus(prev => {
+                            const copy = { ...prev };
+                            delete copy[emp.id];
+                            return copy;
+                          });
+                        }}
+                        className="px-3 py-1 bg-white hover:bg-slate-50 text-slate-500 border border-slate-200 text-[10px] font-black rounded-lg transition-all shadow-sm"
+                      >
+                        자동 계산 적용
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 bg-white p-4 rounded-xl border border-slate-150">
+                    {weeks.map(week => {
+                      const wHours = getWeeklyHoursForEmployee(emp.id, week.key, attendance);
+                      const isAutoEligible = wHours >= 15;
+                      const currentSetting = weeklyHolidayStatus[emp.id]?.[week.key] || 'AUTO';
+                      
+                      const isPaid = currentSetting === 'YES' || (currentSetting === 'AUTO' && isAutoEligible);
+                      const wAllowance = isPaid ? calculateWeeklyHolidayAllowance(wHours, emp.hourlyWage) : 0;
+
                       return (
-                        <tr key={record.date} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-6 py-4 border-b border-slate-100 font-medium text-slate-700">
-                            {format(parse(record.date, 'yyyy-MM-dd', new Date()), 'MM/dd (eee)', { locale: ko })}
-                          </td>
-                          <td className="px-6 py-4 border-b border-slate-100">
-                            <input 
-                              type="time" 
-                              value={record.clockIn || ''} 
-                              onChange={e => setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, clockIn: e.target.value, isAbsence: false } : r))}
-                              className="bg-transparent border-none focus:ring-0 text-slate-900 font-bold p-0 w-20"
-                            />
-                          </td>
-                          <td className="px-6 py-4 border-b border-slate-100">
-                            <input 
-                              type="time" 
-                              value={record.clockOut || ''} 
-                              onChange={e => setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, clockOut: e.target.value, isAbsence: false } : r))}
-                              className="bg-transparent border-none focus:ring-0 text-slate-900 font-bold p-0 w-20"
-                            />
-                          </td>
-                          <td className="px-6 py-4 border-b border-slate-100">
-                            <button 
-                              onClick={() => toggleBreak(emp.id, record.date)}
+                        <div key={week.key} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col justify-between space-y-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <span className="text-[11px] font-black text-slate-600 block">{week.label} 주차</span>
+                              <span className="font-mono text-xs font-bold text-slate-800">{formatWorkTime(wHours)}</span>
+                            </div>
+                            <span className={cn(
+                              "px-2 py-0.5 rounded-full text-[9px] font-black tracking-tight border",
+                              isPaid ? "bg-blue-50 text-blue-600 border-blue-100" : "bg-slate-100 text-slate-400 border-slate-200"
+                            )}>
+                              {isPaid ? `지급 (${formatCurrency(wAllowance)})` : "미지급"}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-0.5 bg-slate-200 p-0.5 rounded-lg border border-slate-300">
+                            <button
+                              onClick={() => {
+                                setWeeklyHolidayStatus(prev => ({
+                                  ...prev,
+                                  [emp.id]: { ...(prev[emp.id] || {}), [week.key]: 'AUTO' }
+                                }));
+                              }}
                               className={cn(
-                                "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all",
-                                record.hasBreak ? "bg-orange-100 text-orange-600 border border-orange-200" : "bg-slate-100 text-slate-400 border border-slate-200"
+                                "py-1 text-[9px] font-black rounded-md transition-all text-center",
+                                currentSetting === 'AUTO' ? "bg-white text-slate-800 shadow-sm border border-slate-200/50" : "text-slate-500 hover:text-slate-800"
                               )}
                             >
-                              {record.hasBreak ? 'Break Y' : 'Break N'}
+                              자동 {isAutoEligible ? 'Y' : 'N'}
                             </button>
-                          </td>
-                          <td className="px-6 py-4 border-b border-slate-100 font-black text-slate-900">
-                            {hours > 0 ? `${hours.toFixed(1)}h` : '-'}
-                          </td>
-                          <td className="px-6 py-4 border-b border-slate-100">
-                            {record.isAbsence ? (
-                              <span className="px-3 py-1 bg-red-100 text-red-600 text-[10px] font-black rounded-full border border-red-200">결석</span>
-                            ) : (
-                              <span className="px-3 py-1 bg-green-100 text-green-600 text-[10px] font-black rounded-full border border-green-200">정상</span>
-                            )}
-                          </td>
-                        </tr>
+                            <button
+                              onClick={() => {
+                                setWeeklyHolidayStatus(prev => ({
+                                  ...prev,
+                                  [emp.id]: { ...(prev[emp.id] || {}), [week.key]: 'YES' }
+                                }));
+                              }}
+                              className={cn(
+                                "py-1 text-[9px] font-black rounded-md transition-all text-center",
+                                currentSetting === 'YES' ? "bg-blue-600 text-white shadow-sm" : "text-slate-500 hover:text-blue-600"
+                              )}
+                            >
+                              지급 Y
+                            </button>
+                            <button
+                              onClick={() => {
+                                setWeeklyHolidayStatus(prev => ({
+                                  ...prev,
+                                  [emp.id]: { ...(prev[emp.id] || {}), [week.key]: 'NO' }
+                                }));
+                              }}
+                              className={cn(
+                                "py-1 text-[9px] font-black rounded-md transition-all text-center",
+                                currentSetting === 'NO' ? "bg-red-650 text-white shadow-sm" : "text-slate-500 hover:text-red-650"
+                              )}
+                            >
+                              미지급 N
+                            </button>
+                          </div>
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </div>
+                </div>
+
+                {/* Daily Work Logs Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-150">
+                        <th className="px-6 py-4">날짜</th>
+                        <th className="px-6 py-4">출근</th>
+                        <th className="px-6 py-4">퇴근</th>
+                        <th className="px-6 py-4">휴게</th>
+                        <th className="px-6 py-4">실근무</th>
+                        <th className="px-6 py-4">추가유형</th>
+                        <th className="px-6 py-4">상태</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {empRecords.map(record => {
+                        const hours = calculateHours(record);
+                        return (
+                          <tr key={record.date} className="hover:bg-slate-50/50 transition-colors border-b border-slate-100">
+                            <td className="px-6 py-4 font-semibold text-slate-700">
+                              {format(parse(record.date, 'yyyy-MM-dd', new Date()), 'MM/dd (eee)', { locale: ko })}
+                            </td>
+                            <td className="px-6 py-4">
+                              <input 
+                                type="time" 
+                                value={record.clockIn || ''} 
+                                onChange={e => {
+                                  const updatedIn = e.target.value;
+                                  setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, clockIn: updatedIn, isAbsence: !updatedIn || !r.clockOut } : r));
+                                }}
+                                className="bg-transparent border-none focus:ring-0 text-slate-900 font-bold p-0 w-20"
+                              />
+                            </td>
+                            <td className="px-6 py-4">
+                              <input 
+                                type="time" 
+                                value={record.clockOut || ''} 
+                                onChange={e => {
+                                  const updatedOut = e.target.value;
+                                  setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, clockOut: updatedOut, isAbsence: !r.clockIn || !updatedOut } : r));
+                                }}
+                                className="bg-transparent border-none focus:ring-0 text-slate-900 font-bold p-0 w-20"
+                              />
+                            </td>
+                            <td className="px-6 py-4">
+                              <button 
+                                onClick={() => toggleBreak(emp.id, record.date)}
+                                className={cn(
+                                  "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all",
+                                  record.hasBreak ? "bg-orange-100 text-orange-600 border border-orange-200" : "bg-slate-100 text-slate-400 border border-slate-200"
+                                )}
+                              >
+                                {record.hasBreak ? 'Break Y' : 'Break N'}
+                              </button>
+                            </td>
+                            <td className="px-6 py-4 font-extrabold text-slate-900 font-mono">
+                              {formatWorkTime(hours)}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => {
+                                    setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, isHolidayWork: !r.isHolidayWork } : r));
+                                  }}
+                                  className={cn(
+                                    "px-2 py-1 rounded-lg text-[10px] font-black transition-all border",
+                                    record.isHolidayWork 
+                                      ? "bg-red-500 text-white border-red-650 shadow-xs" 
+                                      : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                                  )}
+                                >
+                                  공휴일근로 (1.5x)
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, isPaidLeave: !r.isPaidLeave, isAbsence: !r.isPaidLeave ? false : r.isAbsence } : r));
+                                  }}
+                                  className={cn(
+                                    "px-2 py-1 rounded-lg text-[10px] font-black transition-all border",
+                                    record.isPaidLeave 
+                                      ? "bg-purple-600 text-white border-purple-700 shadow-xs" 
+                                      : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                                  )}
+                                >
+                                  유급 연차(Paid)
+                                </button>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              {record.isPaidLeave ? (
+                                <span className="px-2.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-black rounded-full border border-purple-200">유급연차</span>
+                              ) : record.isAbsence ? (
+                                <span className="px-2.5 py-0.5 bg-red-100 text-red-600 text-[10px] font-black rounded-full border border-red-200">결석</span>
+                              ) : (
+                                <span className="px-2.5 py-0.5 bg-green-100 text-green-600 text-[10px] font-black rounded-full border border-green-200">정상</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </motion.div>
-  );
+            );
+          })}
+        </div>
+      </motion.div>
+    );
+  };
 
   const computeEmployeePayroll = (emp: Employee) => {
-    const weeklyHours = getWeeklyHours(emp.id);
-    const holidayAllowance = weeklyHolidayStatus[emp.id]?.[0] !== false ? calculateWeeklyHolidayAllowance(weeklyHours, emp.hourlyWage) : 0;
-    const baseSalary = weeklyHours * emp.hourlyWage;
+    const weeks = getWeeksList();
+    
+    let totalHoursWorked = 0;
+    let holidayAllowance = 0;
+    let holidayWorkPremiumAllowance = 0;
+    let paidLeaveAllowance = 0;
 
-    // Get overrides
-    const taxOverride = employeeTaxOverrides[emp.id] || {
-      taxType: emp.taxType || 'FREELANCER',
-      customTaxRate: emp.customTaxRate || 3.3
-    };
+    // 1. Calculate base weekly hours and weekly holiday allowance
+    weeks.forEach(week => {
+      const wHours = getWeeklyHoursForEmployee(emp.id, week.key, attendance);
+      const isAutoEligible = wHours >= 15;
+      const currentSetting = weeklyHolidayStatus[emp.id]?.[week.key] || 'AUTO';
+      
+      const isPaid = currentSetting === 'YES' || (currentSetting === 'AUTO' && isAutoEligible);
+      if (isPaid) {
+        holidayAllowance += calculateWeeklyHolidayAllowance(wHours, emp.hourlyWage);
+      }
+    });
+
+    // 2. Daily calculations
+    const personRecords = attendance.filter(r => r.employeeId === emp.id);
+    const workDaysCount = personRecords.filter(r => !r.isAbsence && r.clockIn && r.clockOut).length;
+
+    let totalMinutes = 0;
+    let overtimeHours = 0;
+    let nightHours = 0;
+    let holidayHours = 0;
+
+    personRecords.forEach(record => {
+      // Worked hours (including break reduction)
+      let dailyHours = 0;
+      if (!record.isAbsence && record.clockIn && record.clockOut) {
+        dailyHours = calculateHours(record);
+        totalMinutes += dailyHours * 60;
+      }
+
+      // Holiday work premium (public holiday work) - add 50% extra pay for worked hours
+      if (record.isHolidayWork && dailyHours > 0) {
+        holidayWorkPremiumAllowance += dailyHours * emp.hourlyWage * 0.5;
+      }
+
+      // Paid leave allowance - get scheduled hours of the day
+      if (record.isPaidLeave) {
+        const schedH = getScheduledHours(emp, record.date);
+        paidLeaveAllowance += schedH * emp.hourlyWage;
+      }
+
+      // Overtime calculation
+      if (dailyHours > 8) {
+        overtimeHours += (dailyHours - 8);
+      }
+
+      // Night hours
+      if (!record.isAbsence && record.clockIn && record.clockOut) {
+        const nHours = calculateNightHours(record.clockIn, record.clockOut);
+        nightHours += nHours;
+      }
+
+      // Holiday / weekend work count
+      const rDate = parse(record.date, 'yyyy-MM-dd', new Date());
+      const dayIndex = rDate.getDay();
+      const isWeekend = dayIndex === 0 || dayIndex === 6;
+      const daysStr = ['일', '월', '화', '수', '목', '금', '토'];
+      const isCustomHoliday = daysStr[dayIndex] === emp.weeklyHoliday;
+
+      if (isWeekend || isCustomHoliday) {
+        holidayHours += dailyHours;
+      }
+    });
+
+    // average weekly hours over the period
+    const totalHoursCalculated = totalMinutes / 60;
+    const weeklyHours = totalHoursCalculated / Math.max(1, weeks.length);
+    const baseSalary = totalHoursCalculated * emp.hourlyWage;
 
     const allowanceOverride = employeeAllowanceOverrides[emp.id] || emp.allowances || {
       position: 0,
@@ -424,14 +722,21 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
     const omittedAllowance = Number(allowanceOverride.omitted || 0);
 
     const totalAllowances = posAllowance + qualAllowance + bizAllowance + cashAllowance + mealAllowance + otherAllowance + omittedAllowance;
-    const totalGross = baseSalary + holidayAllowance + totalAllowances;
+    
+    // Add custom premium/annual leave allowance to gross!
+    const totalGross = baseSalary + holidayAllowance + totalAllowances + holidayWorkPremiumAllowance + paidLeaveAllowance;
 
-    // Standard 20만원 limits for non-taxable meals
+    // Standard non-taxable meal limit is 200,000 KRW
     const nonTaxableAmount = Math.min(200000, mealAllowance);
     const taxableGross = Math.max(0, totalGross - nonTaxableAmount);
 
     let deductions: Record<string, number> = {};
     let totalDeduction = 0;
+
+    const taxOverride = employeeTaxOverrides[emp.id] || {
+      taxType: emp.taxType || 'FREELANCER',
+      customTaxRate: emp.customTaxRate || 3.3
+    };
 
     if (taxOverride.taxType === 'FREELANCER') {
       const incomeTax = Math.floor(taxableGross * 0.03);
@@ -467,46 +772,6 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
 
     const netSalary = totalGross - totalDeduction;
 
-    // Advanced work statistics calculation
-    const personRecords = attendance.filter(r => r.employeeId === emp.id);
-    const workDaysCount = personRecords.filter(r => !r.isAbsence && r.clockIn && r.clockOut).length;
-
-    let totalMinutes = 0;
-    let overtimeHours = 0;
-    let nightHours = 0;
-    let holidayHours = 0;
-
-    personRecords.forEach(record => {
-      if (record.isAbsence || !record.clockIn || !record.clockOut) return;
-
-      const start = parse(record.clockIn, 'HH:mm', new Date());
-      const end = parse(record.clockOut, 'HH:mm', new Date());
-      let diff = differenceInMinutes(end, start);
-      if (record.hasBreak) {
-        if (diff >= 480) diff -= 60;
-        else if (diff >= 240) diff -= 30;
-      }
-      totalMinutes += diff;
-
-      const activeHours = Math.max(0, diff / 60);
-      if (activeHours > 8) {
-        overtimeHours += (activeHours - 8);
-      }
-
-      const nHours = calculateNightHours(record.clockIn, record.clockOut);
-      nightHours += nHours;
-
-      const rDate = parse(record.date, 'yyyy-MM-dd', new Date());
-      const dayIndex = rDate.getDay();
-      const isWeekend = dayIndex === 0 || dayIndex === 6;
-      const daysStr = ['일', '월', '화', '수', '목', '금', '토'];
-      const isCustomHoliday = daysStr[dayIndex] === emp.weeklyHoliday;
-
-      if (isWeekend || isCustomHoliday) {
-        holidayHours += activeHours;
-      }
-    });
-
     return {
       employeeId: emp.id,
       name: emp.name,
@@ -514,8 +779,10 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
       weeklyHours,
       baseSalary,
       holidayAllowance,
-      allowancesAmount: totalAllowances,
+      allowancesAmount: totalAllowances + holidayWorkPremiumAllowance + paidLeaveAllowance,
       itemizedAllowances: allowanceOverride,
+      holidayWorkPremiumAllowance,
+      paidLeaveAllowance,
       totalGross,
       deductions,
       totalDeduction,

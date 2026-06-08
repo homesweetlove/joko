@@ -39,6 +39,8 @@ export interface AttendanceRecord {
   hasBreak: boolean; // Y/N
   isAbsence: boolean; // 결석 여부
   note?: string;
+  isHolidayWork?: boolean; // 공휴일 근로 여부
+  isPaidLeave?: boolean;   // 유급 휴가 (연차) 여부
 }
 
 export interface PayrollReport {
@@ -68,6 +70,8 @@ export interface PayrollReport {
     overtimeHours: number; // 연장근로시간
     nightHours: number; // 야간근로시간
     holidayHours: number; // 휴일근로시간
+    holidayWorkPremiumAllowance?: number; // 공휴일 근로 가산 수당
+    paidLeaveAllowance?: number;          // 유급 연차 수당
   }[];
 }
 

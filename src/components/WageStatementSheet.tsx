@@ -26,6 +26,8 @@ interface WageStatementSheetProps {
     overtimeHours: number;
     nightHours: number;
     holidayHours: number;
+    holidayWorkPremiumAllowance?: number;
+    paidLeaveAllowance?: number;
   };
   allStatements?: Array<{
     employee: Employee;
@@ -49,6 +51,8 @@ interface WageStatementSheetProps {
       overtimeHours: number;
       nightHours: number;
       holidayHours: number;
+      holidayWorkPremiumAllowance?: number;
+      paidLeaveAllowance?: number;
     };
   }>;
   academyName: string;
@@ -331,11 +335,27 @@ export default function WageStatementSheet({
                         <td className="border border-slate-400 text-right px-3 font-mono">-</td>
                       </tr>
                       <tr>
-                        <td className="border border-slate-400 text-center font-semibold bg-slate-50">누락금</td>
-                        <td className="border border-slate-400 text-right px-3 font-mono text-red-500">{items.omitted ? items.omitted.toLocaleString() : '-'}</td>
+                        <td className="border border-slate-400 text-center font-semibold bg-slate-50 font-bold text-red-500">누락금</td>
+                        <td className="border border-slate-400 text-right px-3 font-mono text-red-500 font-bold">{items.omitted ? items.omitted.toLocaleString() : '-'}</td>
                         <td className="border border-slate-400 text-center font-semibold bg-slate-50">-</td>
                         <td className="border border-slate-400 text-right px-3 font-mono">-</td>
                       </tr>
+                      {calc.holidayWorkPremiumAllowance ? (
+                        <tr>
+                          <td className="border border-slate-400 text-center font-semibold bg-slate-50 text-amber-700 font-bold">공휴가산수당</td>
+                          <td className="border border-slate-400 text-right px-3 font-mono text-amber-700 font-bold">+{calc.holidayWorkPremiumAllowance.toLocaleString()}</td>
+                          <td className="border border-slate-400 text-center font-semibold bg-slate-50">-</td>
+                          <td className="border border-slate-400 text-right px-3 font-mono">-</td>
+                        </tr>
+                      ) : null}
+                      {calc.paidLeaveAllowance ? (
+                        <tr>
+                          <td className="border border-slate-400 text-center font-semibold bg-slate-50 text-purple-700 font-bold">유급연차수당</td>
+                          <td className="border border-slate-400 text-right px-3 font-mono text-purple-700 font-bold">+{calc.paidLeaveAllowance.toLocaleString()}</td>
+                          <td className="border border-slate-400 text-center font-semibold bg-slate-50">-</td>
+                          <td className="border border-slate-400 text-right px-3 font-mono">-</td>
+                        </tr>
+                      ) : null}
                       {/* Total row */}
                       <tr className="bg-slate-200 font-extrabold">
                         <td className="border border-slate-400 text-center py-2 text-slate-900">지급액 계</td>
@@ -422,6 +442,28 @@ export default function WageStatementSheet({
                           {Math.round(calc.holidayHours * emp.hourlyWage).toLocaleString()}
                         </td>
                       </tr>
+                      {calc.holidayWorkPremiumAllowance ? (
+                        <tr>
+                          <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center text-amber-700">공휴가산수당</td>
+                          <td className="border border-slate-400 text-left px-3 text-amber-800">
+                            공휴일 출근 근로 가산 (총 근로시간에 대한 50% 가산수당 적용)
+                          </td>
+                          <td className="border border-slate-400 text-right px-3 font-mono font-bold text-amber-700">
+                            {calc.holidayWorkPremiumAllowance.toLocaleString()}
+                          </td>
+                        </tr>
+                      ) : null}
+                      {calc.paidLeaveAllowance ? (
+                        <tr>
+                          <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center text-purple-700">유급연차수당</td>
+                          <td className="border border-slate-400 text-left px-3 text-purple-800">
+                            유급 휴가 및 연차 사용 (소정근로시간 기준 전액 100% 지급)
+                          </td>
+                          <td className="border border-slate-400 text-right px-3 font-mono font-bold text-purple-700">
+                            {calc.paidLeaveAllowance.toLocaleString()}
+                          </td>
+                        </tr>
+                      ) : null}
                       <tr>
                         <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center">주휴수당 산출</td>
                         <td className="border border-slate-400 text-left px-3">

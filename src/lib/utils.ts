@@ -20,6 +20,71 @@ export function calculateWeeklyHolidayAllowance(weeklyHours: number, hourlyWage:
   return (cappedHours / 40) * 8 * hourlyWage;
 }
 
+export function normalizeTimeToHHMM(val: any): string | undefined {
+  if (val === undefined || val === null) return undefined;
+  
+  let str = String(val).trim();
+  if (!str || str === '-') return undefined;
+
+  // Let's check if it's a fractional number (Excel time format, e.g. 0.375)
+  if (!isNaN(Number(str))) {
+    const num = Number(str);
+    if (num > 0 && num < 1) {
+      const totalSeconds = Math.round(num * 24 * 60 * 60);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      return `${String(hours % 24).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    }
+    // If it's a solid integer like 9 or 18 (some users type hours directly)
+    if (Number.isInteger(num)) {
+      if (num >= 0 && num < 24) {
+        return `${String(num).padStart(2, '0')}:00`;
+      }
+      // If it's 900 or 1830
+      if (num >= 100 && num <= 2400) {
+        const hh = Math.floor(num / 100);
+        const mm = num % 100;
+        if (hh < 24 && mm < 60) {
+          return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+        }
+      }
+    }
+  }
+
+  // Handle Korean style meridiem strings like "오전 9시", "오후 6시 30분", "오후 6:15"
+  const isPM = str.includes('오후') || str.toLowerCase().includes('pm');
+  const isAM = str.includes('오전') || str.toLowerCase().includes('am');
+  
+  // Clean up non-digits except dots or colons for further parse
+  let cleaned = str.replace(/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/g, ' ').trim();
+  // Remove duplicate spaces
+  cleaned = cleaned.replace(/\s+/g, ' ');
+
+  // Look for patterns like HH:MM or HH:MM:SS
+  const colonMatch = cleaned.match(/(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
+  if (colonMatch) {
+    let hh = parseInt(colonMatch[1], 10);
+    let mm = parseInt(colonMatch[2], 10);
+    if (isPM && hh < 12) hh += 12;
+    if (isAM && hh === 12) hh = 0;
+    return `${String(hh % 24).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`;
+  }
+
+  // Look for single hours pattern, e.g. "9" or "18" after stripping Korean characters
+  const numbers = cleaned.split(/\s+/).map(Number).filter(n => !isNaN(n));
+  if (numbers.length >= 1) {
+    let hh = numbers[0];
+    let mm = numbers[1] || 0;
+    if (isPM && hh < 12) hh += 12;
+    if (isAM && hh === 12) hh = 0;
+    if (hh >= 0 && hh < 24 && mm >= 0 && mm < 60) {
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+  }
+
+  return undefined;
+}
+
 export function calculateNightHours(clockIn?: string, clockOut?: string): number {
   if (!clockIn || !clockOut) return 0;
   const parseTime = (t: string) => {
