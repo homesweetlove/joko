@@ -28,14 +28,15 @@ interface PayrollCreationProps {
   employees: Employee[];
   onBack: () => void;
   onSaveReport: (report: PayrollReport) => void;
+  editReport?: PayrollReport;
 }
 
-export default function PayrollCreation({ employees, onBack, onSaveReport }: PayrollCreationProps) {
-  const [step, setStep] = useState(1);
-  const [academyName, setAcademyName] = useState('');
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+export default function PayrollCreation({ employees, onBack, onSaveReport, editReport }: PayrollCreationProps) {
+  const [step, setStep] = useState(editReport ? 3 : 1);
+  const [academyName, setAcademyName] = useState(editReport ? editReport.academyName : '');
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(editReport ? editReport.attendance : []);
   const [selectedWeek, setSelectedWeek] = useState(new Date());
-  const [weeklyHolidayStatus, setWeeklyHolidayStatus] = useState<Record<string, Record<number, boolean>>>({}); 
+  const [weeklyHolidayStatus, setWeeklyHolidayStatus] = useState<Record<string, any>>(editReport ? editReport.weeklyHolidayStatus : {}); 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [employeeTaxOverrides, setEmployeeTaxOverrides] = useState<Record<string, { taxType: 'FREELANCER' | 'FOUR_MAJOR' | 'CUSTOM', customTaxRate: number }>>({});
@@ -48,25 +49,43 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
       const initialAllowances: Record<string, EmployeeAllowances> = {};
 
       employees.forEach(emp => {
-        initialTaxes[emp.id] = {
-          taxType: emp.taxType || 'FREELANCER',
-          customTaxRate: emp.customTaxRate || 3.3
-        };
-        initialAllowances[emp.id] = emp.allowances || {
-          position: 0,
-          qualification: 0,
-          businessPromotion: 0,
-          cashier: 0,
-          meal: 0,
-          other: 0,
-          omitted: 0
-        };
+        const editedCalc = editReport?.calculated.find(c => c.employeeId === emp.id);
+
+        if (editedCalc) {
+          initialTaxes[emp.id] = {
+            taxType: editedCalc.taxType || 'FREELANCER',
+            customTaxRate: editedCalc.customTaxRate || 3.3
+          };
+          initialAllowances[emp.id] = editedCalc.itemizedAllowances || {
+            position: 0,
+            qualification: 0,
+            businessPromotion: 0,
+            cashier: 0,
+            meal: 0,
+            other: 0,
+            omitted: 0
+          };
+        } else {
+          initialTaxes[emp.id] = {
+            taxType: emp.taxType || 'FREELANCER',
+            customTaxRate: emp.customTaxRate || 3.3
+          };
+          initialAllowances[emp.id] = emp.allowances || {
+            position: 0,
+            qualification: 0,
+            businessPromotion: 0,
+            cashier: 0,
+            meal: 0,
+            other: 0,
+            omitted: 0
+          };
+        }
       });
 
       setEmployeeTaxOverrides(initialTaxes);
       setEmployeeAllowanceOverrides(initialAllowances);
     }
-  }, [employees]);
+  }, [employees, editReport]);
 
 
   // Step 1: Academy Name
@@ -871,8 +890,8 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
     });
 
     const newReport: PayrollReport = {
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
+      id: editReport ? editReport.id : crypto.randomUUID(),
+      createdAt: editReport ? editReport.createdAt : new Date().toISOString(),
       academyName,
       employees,
       attendance,

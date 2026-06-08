@@ -14,10 +14,12 @@ interface MainProps {
   reports: PayrollReport[];
   onImportReport: (report: PayrollReport) => void;
   onDeleteReport: (reportId: string) => void;
+  onEditReport: (report: PayrollReport) => void;
 }
 
-export default function Main({ onCreatePayroll, onManageEmployees, employees, onImportEmployees, reports, onImportReport, onDeleteReport }: MainProps) {
+export default function Main({ onCreatePayroll, onManageEmployees, employees, onImportEmployees, reports, onImportReport, onDeleteReport, onEditReport }: MainProps) {
   const reportFileInputRef = useRef<HTMLInputElement>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
   const [viewingReport, setViewingReport] = useState<PayrollReport | null>(null);
 
   // Consolidated Audit Dashboard Integration States
@@ -62,6 +64,30 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
         if (parsed.id && parsed.academyName && Array.isArray(parsed.calculated)) {
           onImportReport(parsed);
           setViewingReport(parsed); // Open inspector directly
+        } else {
+          alert("올바르지 않은 급여대장 결과 패키지 형식입니다.");
+        }
+      } catch (err) {
+        alert("파일을 읽는 중 에러가 발생했습니다: " + err);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleEditReportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const parsed = JSON.parse(evt.target?.result as string);
+        if (parsed.id && parsed.academyName && Array.isArray(parsed.calculated)) {
+          const exists = reports.some(r => r.id === parsed.id);
+          if (!exists) {
+            onImportReport(parsed);
+          }
+          onEditReport(parsed);
         } else {
           alert("올바르지 않은 급여대장 결과 패키지 형식입니다.");
         }
@@ -122,13 +148,29 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
               학원 조교들의 출퇴근 기록을 업로드하고, 주휴수당과 세금을 자동으로 계산하세요. 
               3.3% 프리랜서, 4대보험 공제 방식 및 커스텀 세율(%) 임의 산출을 완벽하게 처리합니다.
             </p>
-            <button
-              onClick={onCreatePayroll}
-              className="btn-3d w-full text-lg group"
-            >
-              조교급여 대장 생성
-              <ChevronRight className="ml-2 group-hover:translate-x-1 transition-transform" />
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={onCreatePayroll}
+                className="btn-3d w-full text-lg group"
+              >
+                조교급여 대장 생성
+                <ChevronRight className="ml-2 group-hover:translate-x-1 transition-transform" />
+              </button>
+              <button
+                onClick={() => editFileInputRef.current?.click()}
+                className="btn-3d-secondary w-full text-lg group flex items-center justify-center gap-1.5"
+              >
+                <Upload size={18} className="text-slate-600 group-hover:scale-105 transition-transform" />
+                조교급여 대장 수정
+              </button>
+              <input
+                type="file"
+                ref={editFileInputRef}
+                onChange={handleEditReportFile}
+                accept=".json"
+                className="hidden"
+              />
+            </div>
           </div>
         </motion.div>
 
@@ -187,6 +229,14 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                           </div>
                         </div>
                         <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              onEditReport(rep);
+                            }}
+                            className="bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 px-3 py-2 rounded-lg text-xs font-bold transition-all"
+                          >
+                            수정
+                          </button>
                           <button
                             onClick={() => {
                               setViewingReport(rep);

@@ -15,6 +15,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState<View>('MAIN');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [reports, setReports] = useState<PayrollReport[]>([]);
+  const [editingReport, setEditingReport] = useState<PayrollReport | null>(null);
 
   // Load employees & reports from localStorage on mount
   useEffect(() => {
@@ -78,6 +79,10 @@ export default function App() {
           reports={reports}
           onImportReport={handleSaveReport}
           onDeleteReport={handleDeleteReport}
+          onEditReport={(report) => {
+            setEditingReport(report);
+            setCurrentView('PAYROLL');
+          }}
         />
       )}
       
@@ -93,9 +98,20 @@ export default function App() {
 
       {currentView === 'PAYROLL' && (
         <PayrollCreation 
-          employees={employees}
-          onBack={() => setCurrentView('MAIN')}
-          onSaveReport={handleSaveReport}
+          employees={editingReport ? editingReport.employees : employees}
+          onBack={() => {
+            setEditingReport(null);
+            setCurrentView('MAIN');
+          }}
+          onSaveReport={(report) => {
+            if (editingReport) {
+              setReports(prev => prev.map(r => r.id === editingReport.id ? report : r));
+              setEditingReport(null);
+            } else {
+              handleSaveReport(report);
+            }
+          }}
+          editReport={editingReport || undefined}
         />
       )}
     </div>
