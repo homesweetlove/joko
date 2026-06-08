@@ -150,10 +150,37 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
     setAttendance(prev => prev.map(r => ({ ...r, hasBreak: true })));
   };
 
+  const getStandardHoursForRecord = (emp: Employee, record: AttendanceRecord) => {
+    try {
+      const d = parse(record.date, 'yyyy-MM-dd', new Date());
+      const daysStr = ['일', '월', '화', '수', '목', '금', '토'] as const;
+      const korDay = daysStr[d.getDay()];
+      const sched = emp.standardWorkHours?.[korDay as any];
+      if (sched && sched.start && sched.end) {
+        return { start: sched.start, end: sched.end };
+      }
+    } catch (e) {
+      // ignore
+    }
+    return { start: '09:00', end: '18:00' };
+  };
+
   const calculateHours = (record: AttendanceRecord) => {
-    if (!record.clockIn || !record.clockOut) return 0;
-    const start = parse(record.clockIn, 'HH:mm', new Date());
-    const end = parse(record.clockOut, 'HH:mm', new Date());
+    let startStr = record.clockIn;
+    let endStr = record.clockOut;
+
+    if (record.isPaidLeave) {
+      const emp = employees.find(e => e.id === record.employeeId);
+      if (emp) {
+        const std = getStandardHoursForRecord(emp, record);
+        startStr = std.start;
+        endStr = std.end;
+      }
+    }
+
+    if (!startStr || !endStr) return 0;
+    const start = parse(startStr, 'HH:mm', new Date());
+    const end = parse(endStr, 'HH:mm', new Date());
     let diff = differenceInMinutes(end, start);
     
     if (record.hasBreak) {
@@ -538,27 +565,47 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
                             <td className="px-6 py-4 font-semibold text-slate-700">
                               {format(parse(record.date, 'yyyy-MM-dd', new Date()), 'MM/dd (eee)', { locale: ko })}
                             </td>
-                            <td className="px-6 py-4">
-                              <input 
-                                type="time" 
-                                value={record.clockIn || ''} 
-                                onChange={e => {
-                                  const updatedIn = e.target.value;
-                                  setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, clockIn: updatedIn, isAbsence: !updatedIn || !r.clockOut } : r));
-                                }}
-                                className="bg-transparent border-none focus:ring-0 text-slate-900 font-bold p-0 w-20"
-                              />
+                            <td className="px-6 py-4 min-w-[130px]">
+                              {(() => {
+                                const std = getStandardHoursForRecord(emp, record);
+                                const displayIn = record.isPaidLeave ? std.start : (record.clockIn || '');
+                                return (
+                                  <input 
+                                    type="time" 
+                                    value={displayIn} 
+                                    disabled={record.isPaidLeave}
+                                    onChange={e => {
+                                      const updatedIn = e.target.value;
+                                      setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, clockIn: updatedIn, isAbsence: !updatedIn || !r.clockOut } : r));
+                                    }}
+                                    className={cn(
+                                      "bg-transparent border-none focus:ring-0 font-bold p-0 w-32 tracking-wider",
+                                      record.isPaidLeave ? "text-slate-400 font-medium cursor-not-allowed" : "text-slate-900 font-extrabold"
+                                    )}
+                                  />
+                                );
+                              })()}
                             </td>
-                            <td className="px-6 py-4">
-                              <input 
-                                type="time" 
-                                value={record.clockOut || ''} 
-                                onChange={e => {
-                                  const updatedOut = e.target.value;
-                                  setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, clockOut: updatedOut, isAbsence: !r.clockIn || !updatedOut } : r));
-                                }}
-                                className="bg-transparent border-none focus:ring-0 text-slate-900 font-bold p-0 w-20"
-                              />
+                            <td className="px-6 py-4 min-w-[130px]">
+                              {(() => {
+                                const std = getStandardHoursForRecord(emp, record);
+                                const displayOut = record.isPaidLeave ? std.end : (record.clockOut || '');
+                                return (
+                                  <input 
+                                    type="time" 
+                                    value={displayOut} 
+                                    disabled={record.isPaidLeave}
+                                    onChange={e => {
+                                      const updatedOut = e.target.value;
+                                      setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, clockOut: updatedOut, isAbsence: !r.clockIn || !updatedOut } : r));
+                                    }}
+                                    className={cn(
+                                      "bg-transparent border-none focus:ring-0 font-bold p-0 w-32 tracking-wider",
+                                      record.isPaidLeave ? "text-slate-400 font-medium cursor-not-allowed" : "text-slate-900 font-extrabold"
+                                    )}
+                                  />
+                                );
+                              })()}
                             </td>
                             <td className="px-6 py-4">
                               <button 
@@ -649,59 +696,61 @@ export default function PayrollCreation({ employees, onBack, onSaveReport }: Pay
 
     // 2. Daily calculations
     const personRecords = attendance.filter(r => r.employeeId === emp.id);
-    const workDaysCount = personRecords.filter(r => !r.isAbsence && r.clockIn && r.clockOut).length;
+    const workDaysCount = personRecords.filter(r => !r.isAbsence && (r.clockIn && r.clockOut || r.isPaidLeave)).length;
 
-    let totalMinutes = 0;
+    let actualMinutes = 0;
+    let paidLeaveMinutes = 0;
     let overtimeHours = 0;
     let nightHours = 0;
     let holidayHours = 0;
 
     personRecords.forEach(record => {
-      // Worked hours (including break reduction)
       let dailyHours = 0;
-      if (!record.isAbsence && record.clockIn && record.clockOut) {
+      if (!record.isAbsence && (record.clockIn && record.clockOut || record.isPaidLeave)) {
         dailyHours = calculateHours(record);
-        totalMinutes += dailyHours * 60;
+        if (record.isPaidLeave) {
+          paidLeaveMinutes += dailyHours * 60;
+        } else {
+          actualMinutes += dailyHours * 60;
+
+          // Overtime calculation
+          if (dailyHours > 8) {
+            overtimeHours += (dailyHours - 8);
+          }
+
+          // Night hours
+          if (record.clockIn && record.clockOut) {
+            const nHours = calculateNightHours(record.clockIn, record.clockOut);
+            nightHours += nHours;
+          }
+
+          // Holiday / weekend work count
+          const rDate = parse(record.date, 'yyyy-MM-dd', new Date());
+          const dayIndex = rDate.getDay();
+          const isWeekend = dayIndex === 0 || dayIndex === 6;
+          const daysStr = ['일', '월', '화', '수', '목', '금', '토'];
+          const isCustomHoliday = daysStr[dayIndex] === emp.weeklyHoliday;
+
+          if (isWeekend || isCustomHoliday) {
+            holidayHours += dailyHours;
+          }
+        }
       }
 
       // Holiday work premium (public holiday work) - add 50% extra pay for worked hours
-      if (record.isHolidayWork && dailyHours > 0) {
+      if (record.isHolidayWork && !record.isPaidLeave && dailyHours > 0) {
         holidayWorkPremiumAllowance += dailyHours * emp.hourlyWage * 0.5;
-      }
-
-      // Paid leave allowance - get scheduled hours of the day
-      if (record.isPaidLeave) {
-        const schedH = getScheduledHours(emp, record.date);
-        paidLeaveAllowance += schedH * emp.hourlyWage;
-      }
-
-      // Overtime calculation
-      if (dailyHours > 8) {
-        overtimeHours += (dailyHours - 8);
-      }
-
-      // Night hours
-      if (!record.isAbsence && record.clockIn && record.clockOut) {
-        const nHours = calculateNightHours(record.clockIn, record.clockOut);
-        nightHours += nHours;
-      }
-
-      // Holiday / weekend work count
-      const rDate = parse(record.date, 'yyyy-MM-dd', new Date());
-      const dayIndex = rDate.getDay();
-      const isWeekend = dayIndex === 0 || dayIndex === 6;
-      const daysStr = ['일', '월', '화', '수', '목', '금', '토'];
-      const isCustomHoliday = daysStr[dayIndex] === emp.weeklyHoliday;
-
-      if (isWeekend || isCustomHoliday) {
-        holidayHours += dailyHours;
       }
     });
 
-    // average weekly hours over the period
+    // Paid leave allowance based on standard contract hours
+    paidLeaveAllowance = (paidLeaveMinutes / 60) * emp.hourlyWage;
+
+    // average weekly hours over the period includes both actual and paid leave
+    const totalMinutes = actualMinutes + paidLeaveMinutes;
     const totalHoursCalculated = totalMinutes / 60;
     const weeklyHours = totalHoursCalculated / Math.max(1, weeks.length);
-    const baseSalary = totalHoursCalculated * emp.hourlyWage;
+    const baseSalary = (actualMinutes / 60) * emp.hourlyWage;
 
     const allowanceOverride = employeeAllowanceOverrides[emp.id] || emp.allowances || {
       position: 0,
