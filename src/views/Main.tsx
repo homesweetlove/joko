@@ -48,6 +48,11 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
   const handleExportReportExcel = (report: PayrollReport | null) => {
     if (!report) return;
 
+    const formatCSVAmount = (val: number) => {
+      const rounded = Math.round(val || 0);
+      return `"${rounded.toLocaleString('ko-KR')}"`;
+    };
+
     const headers = [
       "조교명", "직급", "근무시간(h)", "기본수당(원)", "주휴수당(원)", 
       "연장가산수당(원)", "야간가산수당(원)",
@@ -106,27 +111,27 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
       const row = [
         `"${name}"`,
         `"${pos}"`,
-        hours.toFixed(1),
-        baseSalary,
-        holidayAllowance,
-        overtimeAllow,
-        nightAllow,
-        posAllowance,
-        qualAllowance,
-        bizAllowance,
-        cashAllowance,
-        mealAllowance,
-        otherAllowance,
-        omitted,
-        gross,
+        `"${hours.toFixed(1)}"`,
+        formatCSVAmount(baseSalary),
+        formatCSVAmount(holidayAllowance),
+        formatCSVAmount(overtimeAllow),
+        formatCSVAmount(nightAllow),
+        formatCSVAmount(posAllowance),
+        formatCSVAmount(qualAllowance),
+        formatCSVAmount(bizAllowance),
+        formatCSVAmount(cashAllowance),
+        formatCSVAmount(mealAllowance),
+        formatCSVAmount(otherAllowance),
+        formatCSVAmount(omitted),
+        formatCSVAmount(gross),
         `"${taxTypeStr}"`,
         `"${taxRateStr}"`,
-        np,
-        hi,
-        ltc,
-        ei,
-        totalDeduction,
-        netSalary,
+        formatCSVAmount(np),
+        formatCSVAmount(hi),
+        formatCSVAmount(ltc),
+        formatCSVAmount(ei),
+        formatCSVAmount(totalDeduction),
+        formatCSVAmount(netSalary),
         `"${bName}"`,
         `"${bAcc}"`
       ];

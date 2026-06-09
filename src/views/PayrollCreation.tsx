@@ -1087,7 +1087,13 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
     const totalMinutes = actualMinutes + paidLeaveMinutes;
     const totalHoursCalculated = totalMinutes / 60;
     const weeklyHours = totalHoursCalculated / Math.max(1, weeks.length);
-    const baseSalary = (actualMinutes / 60) * emp.hourlyWage;
+    const baseSalary = Math.round((actualMinutes / 60) * emp.hourlyWage);
+
+    const roundedHolidayAllowance = Math.round(holidayAllowance);
+    const roundedOvertimeAllowance = Math.round(overtimeAllowance);
+    const roundedNightAllowance = Math.round(nightAllowance);
+    const roundedHolidayWorkPremiumAllowance = Math.round(holidayWorkPremiumAllowance);
+    const roundedPaidLeaveAllowance = Math.round(paidLeaveAllowance);
 
     const allowanceOverride = employeeAllowanceOverrides[emp.id] || emp.allowances || {
       position: 0,
@@ -1099,18 +1105,18 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
       omitted: 0
     };
 
-    const posAllowance = Number(allowanceOverride.position || 0);
-    const qualAllowance = Number(allowanceOverride.qualification || 0);
-    const bizAllowance = Number(allowanceOverride.businessPromotion || 0);
-    const cashAllowance = Number(allowanceOverride.cashier || 0);
-    const mealAllowance = Number(allowanceOverride.meal || 0);
-    const otherAllowance = Number(allowanceOverride.other || 0);
-    const omittedAllowance = Number(allowanceOverride.omitted || 0);
+    const posAllowance = Math.round(Number(allowanceOverride.position || 0));
+    const qualAllowance = Math.round(Number(allowanceOverride.qualification || 0));
+    const bizAllowance = Math.round(Number(allowanceOverride.businessPromotion || 0));
+    const cashAllowance = Math.round(Number(allowanceOverride.cashier || 0));
+    const mealAllowance = Math.round(Number(allowanceOverride.meal || 0));
+    const otherAllowance = Math.round(Number(allowanceOverride.other || 0));
+    const omittedAllowance = Math.round(Number(allowanceOverride.omitted || 0));
 
     const totalAllowances = posAllowance + qualAllowance + bizAllowance + cashAllowance + mealAllowance + otherAllowance + omittedAllowance;
     
     // Add custom premium/annual leave allowance to gross! Include overtimeAllowance and nightAllowance
-    const totalGross = baseSalary + holidayAllowance + overtimeAllowance + nightAllowance + totalAllowances + holidayWorkPremiumAllowance + paidLeaveAllowance;
+    const totalGross = Math.round(baseSalary + roundedHolidayAllowance + roundedOvertimeAllowance + roundedNightAllowance + totalAllowances + roundedHolidayWorkPremiumAllowance + roundedPaidLeaveAllowance);
 
     // Standard non-taxable meal limit is 200,000 KRW
     const nonTaxableAmount = Math.min(200000, mealAllowance);
@@ -1125,8 +1131,8 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
     };
 
     if (taxOverride.taxType === 'FREELANCER') {
-      const incomeTax = Math.floor(taxableGross * 0.03);
-      const localTax = Math.floor(incomeTax * 0.1);
+      const incomeTax = Math.round(totalGross * 0.03);
+      const localTax = Math.round(incomeTax * 0.1);
       deductions = {
         '소득세 (3.0%)': incomeTax,
         '지방소득세 (0.3%)': localTax,
@@ -1134,18 +1140,18 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
       totalDeduction = incomeTax + localTax;
     } else if (taxOverride.taxType === 'CUSTOM') {
       const rate = (taxOverride.customTaxRate || 0) / 100;
-      const incomeTax = Math.floor(taxableGross * rate);
-      const localTax = Math.floor(incomeTax * 0.1);
+      const incomeTax = Math.round(totalGross * rate);
+      const localTax = Math.round(incomeTax * 0.1);
       deductions = {
         [`소득세 (${taxOverride.customTaxRate}%)`]: incomeTax,
         '지방소득세 (10%)': localTax,
       };
       totalDeduction = incomeTax + localTax;
     } else {
-      const np = Math.floor(taxableGross * TAX_RATES_2026.FOUR_MAJOR.NATIONAL_PENSION);
-      const hi = Math.floor(taxableGross * TAX_RATES_2026.FOUR_MAJOR.HEALTH_INSURANCE);
-      const ltc = Math.floor(hi * TAX_RATES_2026.FOUR_MAJOR.LONG_TERM_CARE);
-      const ei = Math.floor(taxableGross * TAX_RATES_2026.FOUR_MAJOR.EMPLOYMENT_INSURANCE);
+      const np = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.NATIONAL_PENSION);
+      const hi = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.HEALTH_INSURANCE);
+      const ltc = Math.round(hi * TAX_RATES_2026.FOUR_MAJOR.LONG_TERM_CARE);
+      const ei = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.EMPLOYMENT_INSURANCE);
 
       deductions = {
         '국민연금 (4.5%)': np,
@@ -1156,7 +1162,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
       totalDeduction = np + hi + ltc + ei;
     }
 
-    const netSalary = totalGross - totalDeduction;
+    const netSalary = Math.round(totalGross - totalDeduction);
 
     return {
       employeeId: emp.id,
@@ -1164,13 +1170,21 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
       position: emp.position,
       weeklyHours,
       baseSalary,
-      holidayAllowance,
-      overtimeAllowance,
-      nightAllowance,
-      allowancesAmount: totalAllowances + holidayWorkPremiumAllowance + paidLeaveAllowance,
-      itemizedAllowances: allowanceOverride,
-      holidayWorkPremiumAllowance,
-      paidLeaveAllowance,
+      holidayAllowance: roundedHolidayAllowance,
+      overtimeAllowance: roundedOvertimeAllowance,
+      nightAllowance: roundedNightAllowance,
+      allowancesAmount: totalAllowances + roundedHolidayWorkPremiumAllowance + roundedPaidLeaveAllowance,
+      itemizedAllowances: {
+        position: posAllowance,
+        qualification: qualAllowance,
+        businessPromotion: bizAllowance,
+        cashier: cashAllowance,
+        meal: mealAllowance,
+        other: otherAllowance,
+        omitted: omittedAllowance
+      },
+      holidayWorkPremiumAllowance: roundedHolidayWorkPremiumAllowance,
+      paidLeaveAllowance: roundedPaidLeaveAllowance,
       totalGross,
       deductions,
       totalDeduction,
@@ -1189,6 +1203,11 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
     const reportCalculations = employees.map(emp => {
       return computeEmployeePayroll(emp);
     });
+
+    const formatCSVAmount = (val: number) => {
+      const rounded = Math.round(val || 0);
+      return `"${rounded.toLocaleString('ko-KR')}"`;
+    };
 
     const headers = [
       "조교명", "직급", "근무시간(h)", "기본수당(원)", "주휴수당(원)", 
@@ -1242,27 +1261,27 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
       const row = [
         `"${name}"`,
         `"${pos}"`,
-        hours.toFixed(1),
-        baseSalary,
-        holidayAllowance,
-        overtimeAllow,
-        nightAllow,
-        posAllowance,
-        qualAllowance,
-        bizAllowance,
-        cashAllowance,
-        mealAllowance,
-        otherAllowance,
-        omitted,
-        gross,
+        `"${hours.toFixed(1)}"`,
+        formatCSVAmount(baseSalary),
+        formatCSVAmount(holidayAllowance),
+        formatCSVAmount(overtimeAllow),
+        formatCSVAmount(nightAllow),
+        formatCSVAmount(posAllowance),
+        formatCSVAmount(qualAllowance),
+        formatCSVAmount(bizAllowance),
+        formatCSVAmount(cashAllowance),
+        formatCSVAmount(mealAllowance),
+        formatCSVAmount(otherAllowance),
+        formatCSVAmount(omitted),
+        formatCSVAmount(gross),
         `"${taxTypeStr}"`,
         `"${taxRateStr}"`,
-        np,
-        hi,
-        ltc,
-        ei,
-        totalDeduction,
-        netSalary
+        formatCSVAmount(np),
+        formatCSVAmount(hi),
+        formatCSVAmount(ltc),
+        formatCSVAmount(ei),
+        formatCSVAmount(totalDeduction),
+        formatCSVAmount(netSalary)
       ];
 
       csvRows.push(row.join(","));
