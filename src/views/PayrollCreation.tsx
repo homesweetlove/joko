@@ -1392,10 +1392,13 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                     <span className="text-[11px] font-bold text-slate-500 px-2">정산 세무 방식:</span>
                     <button
                       onClick={() => {
-                        setEmployeeTaxOverrides(prev => ({
-                          ...prev,
-                          [emp.id]: { ...prev[emp.id]!, taxType: 'FREELANCER' }
-                        }));
+                        setEmployeeTaxOverrides(prev => {
+                          const base = prev[emp.id] || { taxType: emp.taxType, customTaxRate: emp.customTaxRate || 3.3 };
+                          return {
+                            ...prev,
+                            [emp.id]: { ...base, taxType: 'FREELANCER' }
+                          };
+                        });
                       }}
                       className={cn(
                         "px-3 py-1 bg-white text-xs font-black rounded-lg transition-all",
@@ -1406,10 +1409,13 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                     </button>
                     <button
                       onClick={() => {
-                        setEmployeeTaxOverrides(prev => ({
-                          ...prev,
-                          [emp.id]: { ...prev[emp.id]!, taxType: 'FOUR_MAJOR' }
-                        }));
+                        setEmployeeTaxOverrides(prev => {
+                          const base = prev[emp.id] || { taxType: emp.taxType, customTaxRate: emp.customTaxRate || 3.3 };
+                          return {
+                            ...prev,
+                            [emp.id]: { ...base, taxType: 'FOUR_MAJOR' }
+                          };
+                        });
                       }}
                       className={cn(
                         "px-3 py-1 bg-white text-xs font-black rounded-lg transition-all",
@@ -1420,10 +1426,13 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                     </button>
                     <button
                       onClick={() => {
-                        setEmployeeTaxOverrides(prev => ({
-                          ...prev,
-                          [emp.id]: { ...prev[emp.id]!, taxType: 'CUSTOM' }
-                        }));
+                        setEmployeeTaxOverrides(prev => {
+                          const base = prev[emp.id] || { taxType: emp.taxType, customTaxRate: emp.customTaxRate || 3.3 };
+                          return {
+                            ...prev,
+                            [emp.id]: { ...base, taxType: 'CUSTOM' }
+                          };
+                        });
                       }}
                       className={cn(
                         "px-3 py-1 bg-white text-xs font-black rounded-lg transition-all",
@@ -1443,10 +1452,13 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                           value={activeTax.customTaxRate}
                           onChange={e => {
                             const val = parseFloat(e.target.value) || 0;
-                            setEmployeeTaxOverrides(prev => ({
-                              ...prev,
-                              [emp.id]: { ...prev[emp.id]!, customTaxRate: val }
-                            }));
+                            setEmployeeTaxOverrides(prev => {
+                              const base = prev[emp.id] || { taxType: emp.taxType, customTaxRate: emp.customTaxRate || 3.3 };
+                              return {
+                                ...prev,
+                                [emp.id]: { ...base, customTaxRate: val }
+                              };
+                            });
                           }}
                           className="w-10 text-[11px] font-bold p-0.5 border border-slate-300 rounded text-center bg-white"
                         />

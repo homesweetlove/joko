@@ -795,9 +795,11 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                       {activeReport ? (() => {
                         const list = activeReport.calculated.filter((calc) => {
                           const nameMatch = calc.name.toLowerCase().includes(auditSearchQuery.toLowerCase());
+                          const emp = activeReport.employees.find(e => e.id === calc.employeeId);
+                          const resolvedTaxType = calc.taxType || emp?.taxType || 'FREELANCER';
                           const taxMatch = auditTaxFilter === 'all' || 
-                            (auditTaxFilter === 'FREELANCER' && (calc.taxType === 'FREELANCER' || calc.taxType === 'CUSTOM')) ||
-                            (auditTaxFilter === 'FOUR_MAJOR' && calc.taxType === 'FOUR_MAJOR');
+                            (auditTaxFilter === 'FREELANCER' && (resolvedTaxType === 'FREELANCER' || resolvedTaxType === 'CUSTOM')) ||
+                            (auditTaxFilter === 'FOUR_MAJOR' && resolvedTaxType === 'FOUR_MAJOR');
                           return nameMatch && taxMatch;
                         });
 
@@ -810,11 +812,14 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                         }
 
                         return list.map((calc) => {
+                          const emp = activeReport.employees.find(e => e.id === calc.employeeId);
+                          const resolvedTaxType = calc.taxType || emp?.taxType || 'FREELANCER';
                           let taxBadgeLabel = '4대보험';
-                          if (calc.taxType === 'FREELANCER') {
+                          if (resolvedTaxType === 'FREELANCER') {
                             taxBadgeLabel = '3.3% 프리';
-                          } else if (calc.taxType === 'CUSTOM') {
-                            taxBadgeLabel = `커스텀 (${calc.customTaxRate || 0}%)`;
+                          } else if (resolvedTaxType === 'CUSTOM') {
+                            const rate = calc.customTaxRate !== undefined ? calc.customTaxRate : (emp?.customTaxRate || 0);
+                            taxBadgeLabel = `커스텀 (${rate}%)`;
                           }
 
                           return (
@@ -835,8 +840,8 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                               <div className="text-right">
                                 <div className={cn(
                                   "text-[9px] px-1.5 py-0.5 rounded font-black inline-block mb-1 tracking-tight",
-                                  calc.taxType === 'FREELANCER' ? "bg-blue-50 text-blue-600" :
-                                  calc.taxType === 'FOUR_MAJOR' ? "bg-purple-50 text-purple-600" : "bg-amber-50 text-amber-600"
+                                  resolvedTaxType === 'FREELANCER' ? "bg-blue-50 text-blue-600" :
+                                  resolvedTaxType === 'FOUR_MAJOR' ? "bg-purple-50 text-purple-600" : "bg-amber-50 text-amber-600"
                                 )}>
                                   {taxBadgeLabel}
                                 </div>
@@ -1206,11 +1211,70 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                               const selectedCalc = activeReport.calculated.find(c => c.employeeId === activeAuditEmployeeId);
                               const selectedEmp = activeReport.employees.find(e => e.id === activeAuditEmployeeId);
                               if (!selectedCalc) {
-                                return (
-                                  <div className="text-center py-20 text-slate-400 text-sm font-semibold border-2 border-dashed border-slate-200/60 bg-white/40 p-12 rounded-2xl">
-                                    왼쪽의 조교 목록에서 급여를 상세 감사할 대상을 지정하십시오.
-                                  </div>
-                                );
+                                  return (
+                                    <div className="text-center py-20 text-slate-400 text-sm font-semibold border-2 border-dashed border-slate-200/60 bg-white/40 p-12 rounded-2xl">
+                                      왼쪽의 조교 목록에서 급여를 상세 감사할 대상을 지정하십시오.
+                                    </div>
+                                  );
+                              }
+
+                              const resolvedTaxType = selectedCalc.taxType || selectedEmp?.taxType || 'FREELANCER';
+                              const resolvedCustomTaxRate = selectedCalc.customTaxRate !== undefined ? selectedCalc.customTaxRate : (selectedEmp?.customTaxRate || 3.3);
+
+                              // Ensure deductions are computed on the fly if they are missing or sum to 0 but the gross salary is > 0
+                              let resolvedDeductions = { ...selectedCalc.deductions };
+                              let resolvedTotalDeduction = selectedCalc.totalDeduction || 0;
+                              let resolvedNetSalary = selectedCalc.netSalary || 0;
+
+                              const totalDeductionsSum = Object.values(resolvedDeductions).reduce((s, v) => (s as number) + (v as number), 0);
+                              if (totalDeductionsSum === 0 && selectedCalc.totalGross > 0) {
+                                const mealAllowance = selectedCalc.itemizedAllowances?.meal || 0;
+                                const nonTaxableAmount = Math.min(200000, mealAllowance);
+                                const taxableGross = Math.max(0, selectedCalc.totalGross - nonTaxableAmount);
+
+                                const TAX_RATES_2026 = {
+                                  FREELANCER: 0.033,
+                                  FOUR_MAJOR: {
+                                    NATIONAL_PENSION: 0.045,
+                                    HEALTH_INSURANCE: 0.03545,
+                                    LONG_TERM_CARE: 0.1295,
+                                    EMPLOYMENT_INSURANCE: 0.009,
+                                  }
+                                };
+
+                                if (resolvedTaxType === 'FREELANCER') {
+                                  const incomeTax = Math.round(selectedCalc.totalGross * 0.03);
+                                  const localTax = Math.round(incomeTax * 0.1);
+                                  resolvedDeductions = {
+                                    '소득세 (3.0%)': incomeTax,
+                                    '지방소득세 (0.3%)': localTax,
+                                  };
+                                  resolvedTotalDeduction = incomeTax + localTax;
+                                } else if (resolvedTaxType === 'CUSTOM') {
+                                  const rate = (resolvedCustomTaxRate || 0) / 100;
+                                  const incomeTax = Math.round(selectedCalc.totalGross * rate);
+                                  const localTax = Math.round(incomeTax * 0.1);
+                                  resolvedDeductions = {
+                                    [`소득세 (${resolvedCustomTaxRate}%)`]: incomeTax,
+                                    '지방소득세 (10%)': localTax,
+                                  };
+                                  resolvedTotalDeduction = incomeTax + localTax;
+                                } else {
+                                  // FOUR_MAJOR
+                                  const np = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.NATIONAL_PENSION);
+                                  const hi = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.HEALTH_INSURANCE);
+                                  const ltc = Math.round(hi * TAX_RATES_2026.FOUR_MAJOR.LONG_TERM_CARE);
+                                  const ei = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.EMPLOYMENT_INSURANCE);
+
+                                  resolvedDeductions = {
+                                    '국민연금 (4.5%)': np,
+                                    '건강보험 (3.545%)': hi,
+                                    '장기요양보험': ltc,
+                                    '고용보험 (0.9%)': ei,
+                                  };
+                                  resolvedTotalDeduction = np + hi + ltc + ei;
+                                }
+                                resolvedNetSalary = Math.round(selectedCalc.totalGross - resolvedTotalDeduction);
                               }
 
                               const personAttendance = activeReport.attendance.filter(att => att.employeeId === activeAuditEmployeeId);
@@ -1242,10 +1306,10 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                                       <div>
                                         <span className="text-slate-400 font-medium block">세금설정</span>
                                         <span className="text-blue-600">
-                                          {selectedCalc.taxType === 'FREELANCER'
+                                          {resolvedTaxType === 'FREELANCER'
                                             ? '3.3% 사업소득세'
-                                            : selectedCalc.taxType === 'CUSTOM'
-                                            ? `커스텀 (${selectedCalc.customTaxRate || 0}%)`
+                                            : resolvedTaxType === 'CUSTOM'
+                                            ? `커스텀 (${resolvedCustomTaxRate}%)`
                                             : '4대보험 공제'}
                                         </span>
                                       </div>
@@ -1356,7 +1420,7 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                                         <Clock size={14} className="text-red-500" />
                                         공제 세금 및 영수 법정 요율
                                       </h6>
-                                      {Object.entries(selectedCalc.deductions).map(([taxName, amt]) => (
+                                      {Object.entries(resolvedDeductions).map(([taxName, amt]) => (
                                         <div key={taxName} className="flex justify-between">
                                           <span className="text-slate-500">{taxName}</span>
                                           <span className="font-extrabold text-red-600">-{formatCurrency(amt as number)}</span>
@@ -1365,7 +1429,7 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                                       <hr className="border-red-105" />
                                       <div className="flex justify-between text-base font-black text-red-600">
                                         <span>공제 합계액</span>
-                                        <span>-{formatCurrency(selectedCalc.totalDeduction)}</span>
+                                        <span>-{formatCurrency(resolvedTotalDeduction)}</span>
                                       </div>
                                     </div>
                                   </div>
@@ -1374,7 +1438,7 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                                   <div className="p-6 bg-slate-900 text-white rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-4">
                                     <div>
                                       <span className="text-slate-400 text-xs font-bold block uppercase tracking-widest mb-1">실 수령급여 산출액</span>
-                                      <span className="text-slate-300 text-xs font-semibold">{formatCurrency(selectedCalc.totalGross)} (세전) - {formatCurrency(selectedCalc.totalDeduction)} (공제)</span>
+                                      <span className="text-slate-300 text-xs font-semibold">{formatCurrency(selectedCalc.totalGross)} (세전) - {formatCurrency(resolvedTotalDeduction)} (공제)</span>
                                     </div>
                                     <div className="text-right flex flex-wrap gap-3 items-center justify-end">
                                       <button
@@ -1395,7 +1459,7 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                                         법정 임금명세서 인쇄
                                       </button>
                                       <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded font-black uppercase tracking-widest">NET PAY</span>
-                                      <span className="text-3xl font-black text-white leading-none inline-block">{formatCurrency(selectedCalc.netSalary)}</span>
+                                      <span className="text-3xl font-black text-white leading-none inline-block">{formatCurrency(resolvedNetSalary)}</span>
                                     </div>
                                   </div>
                                 </>
@@ -1405,38 +1469,181 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                         </div>
                       );
                     })()}
-                  </div>
+                   </div>
+ 
+                 </div>
+               </motion.div>
+             </div>
+           );
+         })()}
+       </AnimatePresence>
+ 
+       {/* Wage Statement Sheet for Audited Reports */}
+       {showPayslipEmpId && viewingReport && (() => {
+         // Find reference report safely
+         const filteredReports = reports.filter((rep) => {
+           const d = new Date(rep.createdAt);
+           const yearMatch = filterYear === 'all' || d.getFullYear() === Number(filterYear);
+           const monthMatch = filterMonth === 'all' || (d.getMonth() + 1) === Number(filterMonth);
+           return yearMatch && monthMatch;
+         });
+         const activeReport = filteredReports.find(r => r.academyName === selectedAcademy) || viewingReport;
+ 
+         const emp = activeReport.employees.find(e => e.id === showPayslipEmpId);
+         const calculated = activeReport.calculated.find(c => c.employeeId === showPayslipEmpId);
+         if (!emp || !calculated) return null;
+ 
+         const resolvedTaxType = calculated.taxType || emp.taxType || 'FREELANCER';
+         const resolvedCustomTaxRate = calculated.customTaxRate !== undefined ? calculated.customTaxRate : (emp.customTaxRate || 3.3);
+ 
+         let resolvedDeductions = { ...calculated.deductions };
+         let resolvedTotalDeduction = calculated.totalDeduction || 0;
+         let resolvedNetSalary = calculated.netSalary || 0;
+ 
+         const totalDeductionsSum = Object.values(resolvedDeductions).reduce((s, v) => (s as number) + (v as number), 0);
+         if (totalDeductionsSum === 0 && calculated.totalGross > 0) {
+           const mealAllowance = calculated.itemizedAllowances?.meal || 0;
+           const nonTaxableAmount = Math.min(200000, mealAllowance);
+           const taxableGross = Math.max(0, calculated.totalGross - nonTaxableAmount);
+ 
+           const TAX_RATES_2026 = {
+             FREELANCER: 0.033,
+             FOUR_MAJOR: {
+               NATIONAL_PENSION: 0.045,
+               HEALTH_INSURANCE: 0.03545,
+               LONG_TERM_CARE: 0.1295,
+               EMPLOYMENT_INSURANCE: 0.009,
+             }
+           };
+ 
+           if (resolvedTaxType === 'FREELANCER') {
+             const incomeTax = Math.round(calculated.totalGross * 0.03);
+             const localTax = Math.round(incomeTax * 0.1);
+             resolvedDeductions = {
+               '소득세 (3.0%)': incomeTax,
+               '지방소득세 (0.3%)': localTax,
+             };
+             resolvedTotalDeduction = incomeTax + localTax;
+           } else if (resolvedTaxType === 'CUSTOM') {
+             const rate = (resolvedCustomTaxRate || 0) / 100;
+             const incomeTax = Math.round(calculated.totalGross * rate);
+             const localTax = Math.round(incomeTax * 0.1);
+             resolvedDeductions = {
+               [`소득세 (${resolvedCustomTaxRate}%)`]: incomeTax,
+               '지방소득세 (10%)': localTax,
+             };
+             resolvedTotalDeduction = incomeTax + localTax;
+           } else {
+             // FOUR_MAJOR
+             const np = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.NATIONAL_PENSION);
+             const hi = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.HEALTH_INSURANCE);
+             const ltc = Math.round(hi * TAX_RATES_2026.FOUR_MAJOR.LONG_TERM_CARE);
+             const ei = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.EMPLOYMENT_INSURANCE);
+ 
+             resolvedDeductions = {
+               '국민연금 (4.5%)': np,
+               '건강보험 (3.545%)': hi,
+               '장기요양보험': ltc,
+               '고용보험 (0.9%)': ei,
+             };
+             resolvedTotalDeduction = np + hi + ltc + ei;
+           }
+           resolvedNetSalary = Math.round(calculated.totalGross - resolvedTotalDeduction);
+         }
+ 
+         const resolvedCalculatedForSheet = {
+           ...calculated,
+           taxType: resolvedTaxType,
+           customTaxRate: resolvedCustomTaxRate,
+           deductions: resolvedDeductions,
+           totalDeduction: resolvedTotalDeduction,
+           netSalary: resolvedNetSalary,
+         };
+ 
+         return (
+           <WageStatementSheet
+             employee={emp}
+             calculated={resolvedCalculatedForSheet as any}
+             academyName={activeReport.academyName}
+             onClose={() => setShowPayslipEmpId(null)}
+           />
+         );
+             })()}
+                {/*
+                const nonTaxableAmount = Math.min(200000, mealAllowance);
+                const taxableGross = Math.max(0, calc.totalGross - nonTaxableAmount);
 
-                </div>
-              </motion.div>
-            </div>
-          );
-        })()}
-      </AnimatePresence>
+                const TAX_RATES_2026 = {
+                  FREELANCER: 0.033,
+                  FOUR_MAJOR: {
+                    NATIONAL_PENSION: 0.045,
+                    HEALTH_INSURANCE: 0.03545,
+                    LONG_TERM_CARE: 0.1295,
+                    EMPLOYMENT_INSURANCE: 0.009,
+                  }
+                };
 
-      {/* Wage Statement Sheet for Audited Reports */}
-      {showPayslipEmpId && viewingReport && (() => {
-        // Find reference report safely
-        const filteredReports = reports.filter((rep) => {
-          const d = new Date(rep.createdAt);
-          const yearMatch = filterYear === 'all' || d.getFullYear() === Number(filterYear);
-          const monthMatch = filterMonth === 'all' || (d.getMonth() + 1) === Number(filterMonth);
-          return yearMatch && monthMatch;
-        });
-        const activeReport = filteredReports.find(r => r.academyName === selectedAcademy) || viewingReport;
+                if (resolvedTaxType === 'FREELANCER') {
+                  const incomeTax = Math.round(calc.totalGross * 0.03);
+                  const localTax = Math.round(incomeTax * 0.1);
+                  resolvedDeductions = {
+                    '소득세 (3.0%)': incomeTax,
+                    '지방소득세 (0.3%)': localTax,
+                  };
+                  resolvedTotalDeduction = incomeTax + localTax;
+                } else if (resolvedTaxType === 'CUSTOM') {
+                  const rate = (resolvedCustomTaxRate || 0) / 100;
+                  const incomeTax = Math.round(calc.totalGross * rate);
+                  const localTax = Math.round(incomeTax * 0.1);
+                  resolvedDeductions = {
+                    [`소득세 (${resolvedCustomTaxRate}%)`]: incomeTax,
+                    '지방소득세 (10%)': localTax,
+                  };
+                  resolvedTotalDeduction = incomeTax + localTax;
+                } else {
+                  // FOUR_MAJOR
+                  const np = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.NATIONAL_PENSION);
+                  const hi = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.HEALTH_INSURANCE);
+                  const ltc = Math.round(hi * TAX_RATES_2026.FOUR_MAJOR.LONG_TERM_CARE);
+                  const ei = Math.round(taxableGross * TAX_RATES_2026.FOUR_MAJOR.EMPLOYMENT_INSURANCE);
 
-        const emp = activeReport.employees.find(e => e.id === showPayslipEmpId);
-        const calculated = activeReport.calculated.find(c => c.employeeId === showPayslipEmpId);
-        if (!emp || !calculated) return null;
-        return (
-          <WageStatementSheet
-            employee={emp}
-            calculated={calculated as any}
+                  resolvedDeductions = {
+                    '국민연금 (4.5%)': np,
+                    '건강보험 (3.545%)': hi,
+                    '장기요양보험': ltc,
+                    '고용보험 (0.9%)': ei,
+                  };
+                  resolvedTotalDeduction = np + hi + ltc + ei;
+                }
+              }
+
+              acc.totalDeduction += resolvedTotalDeduction;
+              acc.netSalary += Math.round(calc.totalGross - resolvedTotalDeduction);
+
+              // Deductions detailed breakdown
+              Object.entries(resolvedDeductions).forEach(([key, val]) => {
+                acc.deductionsBreakdown[key] = (acc.deductionsBreakdown[key] || 0) + (val as number);
+              });
+            }
+            return acc;
+          }, {
+            hours: 0,
+            baseSalary: 0,
+            holidayAllowance: 0,
+            overtimeAllowance: 0,
+            nightAllowance: 0,
+            allowancesAmount: 0,
+            totalGross: 0,
+            totalDeduction: 0,
+            netSalary: 0,
+            monthsCount: 0,
+            deductionsBreakdown: {} as Record<string, number>
+          });
             academyName={activeReport.academyName}
             onClose={() => setShowPayslipEmpId(null)}
           />
         );
-      })()}
+      })()} */}
 
       {/* Bulk Wage Statement Sheet for Audited Reports */}
       {showBulkStatements && viewingReport && (() => {
