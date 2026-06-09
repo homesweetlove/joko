@@ -140,6 +140,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
 
         const parsedIn = normalizeTimeToHHMM(clockIn);
         const parsedOut = normalizeTimeToHHMM(clockOut);
+        const isNight = (parsedIn && parsedOut) ? (calculateNightHours(parsedIn, parsedOut) > 0) : false;
 
         parsedRecords.push({
           employeeId: employee.id,
@@ -148,6 +149,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
           clockOut: parsedOut,
           hasBreak: false,
           isAbsence: !parsedIn || !parsedOut || clockIn === '-',
+          isNightWork: isNight,
         });
       });
 
@@ -685,149 +687,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                   </div>
                 </div>
 
-                {/* Week-by-week Night/Overtime Allowance Controls */}
-                <div className="p-6 bg-slate-50/50 border-b border-slate-150 space-y-4 border-t border-slate-150/80">
-                  <div className="flex flex-wrap justify-between items-center gap-3">
-                    <div>
-                      <span className="font-bold text-xs text-slate-700 block uppercase tracking-tight">주차별 연장·야간수당(야근근무) 가산 지급 설정</span>
-                      <span className="text-[11px] text-slate-500">조교의 시간외 연장 근무(8시간 초과) 및 야간 야근(22시~06시)에 대한 0.5배 가산수당 지급 여부를 조정하세요.</span>
-                    </div>
-                    
-                    {/* Bulk Action Pills */}
-                    <div className="flex gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
-                      <button
-                        onClick={() => {
-                          const updated: Record<string, string> = {};
-                          weeks.forEach(w => { updated[w.key] = 'YES'; });
-                          setNightWorkStatus(prev => ({ ...prev, [emp.id]: updated }));
-                        }}
-                        className="px-3 py-1 bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 text-[10px] font-black rounded-lg transition-all shadow-sm cursor-pointer"
-                      >
-                        야근가산 일괄 지급(Y)
-                      </button>
-                      <button
-                        onClick={() => {
-                          const updated: Record<string, string> = {};
-                          weeks.forEach(w => { updated[w.key] = 'NO'; });
-                          setNightWorkStatus(prev => ({ ...prev, [emp.id]: updated }));
-                        }}
-                        className="px-3 py-1 bg-white hover:bg-red-50 text-red-650 border border-slate-200 text-[10px] font-black rounded-lg transition-all shadow-sm cursor-pointer"
-                      >
-                        야근가산 일괄 미지급(N)
-                      </button>
-                      <button
-                        onClick={() => {
-                          setNightWorkStatus(prev => {
-                            const copy = { ...prev };
-                            delete copy[emp.id];
-                            return copy;
-                          });
-                        }}
-                        className="px-3 py-1 bg-white hover:bg-slate-50 text-slate-500 border border-slate-200 text-[10px] font-black rounded-lg transition-all shadow-sm cursor-pointer"
-                      >
-                        자동 계산 적용
-                      </button>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 bg-white p-4 rounded-xl border border-slate-150">
-                    {weeks.map(week => {
-                      let wOvertime = 0;
-                      let wNight = 0;
-                      
-                      const weekRecords = attendance.filter(r => r.employeeId === emp.id);
-                      weekRecords.forEach(record => {
-                        try {
-                          const rd = parse(record.date, 'yyyy-MM-dd', new Date());
-                          const rStart = format(startOfWeek(rd, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-                          if (rStart === week.key && !record.isAbsence && (record.clockIn && record.clockOut || record.isPaidLeave)) {
-                            const dailyHours = calculateHours(record);
-                            if (!record.isPaidLeave) {
-                              if (dailyHours > 8) {
-                                wOvertime += (dailyHours - 8);
-                              }
-                              const adjusted = getGraceAdjustedTimes(record);
-                              if (adjusted.clockIn && adjusted.clockOut) {
-                                wNight += calculateNightHours(adjusted.clockIn, adjusted.clockOut);
-                              }
-                            }
-                          }
-                        } catch (e) {
-                          // ignore
-                        }
-                      });
-
-                      const currentNightSetting = nightWorkStatus[emp.id]?.[week.key] || 'AUTO';
-                      const isNightPremiumPaid = currentNightSetting === 'YES' || currentNightSetting === 'AUTO';
-                      
-                      const computedPremium = isNightPremiumPaid ? Math.round((wOvertime * emp.hourlyWage * 0.5) + (wNight * emp.hourlyWage * 0.5)) : 0;
-
-                      return (
-                        <div key={week.key} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col justify-between space-y-3">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <span className="text-[11px] font-black text-slate-600 block">{week.label} 주차 야간·연장</span>
-                              <span className="font-mono text-[10px] text-slate-400 block mt-0.5 leading-none font-semibold">
-                                연장 {wOvertime.toFixed(1)}h / 야간 {wNight.toFixed(1)}h
-                              </span>
-                            </div>
-                            <span className={cn(
-                              "px-2 py-0.5 rounded-full text-[9px] font-black tracking-tight border",
-                              isNightPremiumPaid && computedPremium > 0 ? "bg-violet-50 text-violet-600 border-violet-100" : "bg-slate-100 text-slate-400 border-slate-200"
-                            )}>
-                              {isNightPremiumPaid && computedPremium > 0 ? `가산 (+${formatCurrency(computedPremium)})` : "가산 없음"}
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-3 gap-0.5 bg-slate-200 p-0.5 rounded-lg border border-slate-300">
-                            <button
-                              onClick={() => {
-                                setNightWorkStatus(prev => ({
-                                  ...prev,
-                                  [emp.id]: { ...(prev[emp.id] || {}), [week.key]: 'AUTO' }
-                                }));
-                              }}
-                              className={cn(
-                                "py-1 text-[9px] font-black rounded-md transition-all text-center cursor-pointer",
-                                currentNightSetting === 'AUTO' ? "bg-white text-slate-800 shadow-sm border border-slate-200/50" : "text-slate-500 hover:text-slate-800"
-                              )}
-                            >
-                              자동 Y
-                            </button>
-                            <button
-                              onClick={() => {
-                                setNightWorkStatus(prev => ({
-                                  ...prev,
-                                  [emp.id]: { ...(prev[emp.id] || {}), [week.key]: 'YES' }
-                                }));
-                              }}
-                              className={cn(
-                                "py-1 text-[9px] font-black rounded-md transition-all text-center cursor-pointer",
-                                currentNightSetting === 'YES' ? "bg-violet-600 text-white shadow-sm" : "text-slate-500 hover:text-violet-650"
-                              )}
-                            >
-                              지급 Y
-                            </button>
-                            <button
-                              onClick={() => {
-                                setNightWorkStatus(prev => ({
-                                  ...prev,
-                                  [emp.id]: { ...(prev[emp.id] || {}), [week.key]: 'NO' }
-                                }));
-                              }}
-                              className={cn(
-                                "py-1 text-[9px] font-black rounded-md transition-all text-center cursor-pointer",
-                                currentNightSetting === 'NO' ? "bg-red-650 text-white shadow-sm" : "text-slate-500 hover:text-red-650"
-                              )}
-                            >
-                              미지급 N
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
 
                 {/* Daily Work Logs Table */}
                 <div className="overflow-x-auto border border-slate-150 rounded-xl">
@@ -847,13 +707,24 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                     <tbody>
                       {empRecords.map(record => {
                         const hours = calculateHours(record);
+                        const dailyNight = (() => {
+                          if (record.isPaidLeave || !record.clockIn || !record.clockOut) return 0;
+                          const adjusted = getGraceAdjustedTimes(record);
+                          return adjusted.clockIn && adjusted.clockOut 
+                            ? calculateNightHours(adjusted.clockIn, adjusted.clockOut) 
+                            : 0;
+                        })();
                         const dailyWage = (() => {
                           if (record.isAbsence && !record.isPaidLeave) return 0;
                           let rate = 1.0;
                           if (record.isHolidayWork && !record.isPaidLeave) {
                             rate = 1.5;
                           }
-                          return Math.floor(hours * emp.hourlyWage * rate);
+                          const baseAndHoliday = Math.floor(hours * emp.hourlyWage * rate);
+                          const nightPremium = (record.isNightWork && dailyNight > 0) 
+                            ? Math.round(dailyNight * emp.hourlyWage * 0.5) 
+                            : 0;
+                          return baseAndHoliday + nightPremium;
                         })();
                         return (
                           <tr key={record.date} className="hover:bg-slate-50/50 transition-colors border-b border-slate-100">
@@ -871,7 +742,18 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                                     disabled={record.isPaidLeave}
                                     onChange={e => {
                                       const updatedIn = e.target.value;
-                                      setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, clockIn: updatedIn, isAbsence: !updatedIn || !r.clockOut } : r));
+                                      setAttendance(prev => prev.map(r => {
+                                        if (r.date === record.date && r.employeeId === emp.id) {
+                                          const nightHrs = (updatedIn && r.clockOut) ? calculateNightHours(updatedIn, r.clockOut) : 0;
+                                          return {
+                                            ...r,
+                                            clockIn: updatedIn,
+                                            isAbsence: !updatedIn || !r.clockOut,
+                                            isNightWork: nightHrs > 0 ? true : r.isNightWork
+                                          };
+                                        }
+                                        return r;
+                                      }));
                                     }}
                                     className={cn(
                                       "bg-transparent border-none focus:ring-0 font-bold p-0 w-32 tracking-wider",
@@ -892,7 +774,18 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                                     disabled={record.isPaidLeave}
                                     onChange={e => {
                                       const updatedOut = e.target.value;
-                                      setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, clockOut: updatedOut, isAbsence: !r.clockIn || !updatedOut } : r));
+                                      setAttendance(prev => prev.map(r => {
+                                        if (r.date === record.date && r.employeeId === emp.id) {
+                                          const nightHrs = (r.clockIn && updatedOut) ? calculateNightHours(r.clockIn, updatedOut) : 0;
+                                          return {
+                                            ...r,
+                                            clockOut: updatedOut,
+                                            isAbsence: !r.clockIn || !updatedOut,
+                                            isNightWork: nightHrs > 0 ? true : r.isNightWork
+                                          };
+                                        }
+                                        return r;
+                                      }));
                                     }}
                                     className={cn(
                                       "bg-transparent border-none focus:ring-0 font-bold p-0 w-32 tracking-wider",
@@ -943,6 +836,19 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                                   )}
                                 >
                                   유급 연차(Paid)
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setAttendance(prev => prev.map(r => r.date === record.date && r.employeeId === emp.id ? { ...r, isNightWork: !r.isNightWork } : r));
+                                  }}
+                                  className={cn(
+                                    "px-2 py-1 rounded-lg text-[10px] font-black transition-all border whitespace-nowrap",
+                                    record.isNightWork 
+                                      ? "bg-amber-500 text-white border-amber-600 shadow-xs" 
+                                      : "bg-white text-slate-300 border-slate-200 hover:bg-slate-50 text-slate-500"
+                                  )}
+                                >
+                                  야간가산 (0.5x){dailyNight > 0 ? ` (${dailyNight.toFixed(1)}h)` : ''}
                                 </button>
                               </div>
                             </td>
@@ -1026,38 +932,19 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
         } else {
           actualMinutes += dailyHours * 60;
 
-          // Compute week key for the day
-          let recordWeekKey = '';
-          try {
-            const rd = parse(record.date, 'yyyy-MM-dd', new Date());
-            const rStart = startOfWeek(rd, { weekStartsOn: 1 });
-            recordWeekKey = format(rStart, 'yyyy-MM-dd');
-          } catch (e) {
-            // ignore
-          }
-
-          const nightWorkSetting = nightWorkStatus[emp.id]?.[recordWeekKey] || 'AUTO';
-          // AUTO and YES will compute overtime/night premium. NO will skip.
-          const isNightPremiumPaid = nightWorkSetting === 'YES' || nightWorkSetting === 'AUTO';
-
-          // Overtime calculation
+          // Overtime calculation disabled as requested
           let dailyOvertime = 0;
-          if (dailyHours > 8) {
-            dailyOvertime = (dailyHours - 8);
-            overtimeHours += dailyOvertime;
-          }
 
-          // Night hours
+          // Night hours (Calculated daily based on isNightWork status)
           let dailyNight = 0;
           const adjusted = getGraceAdjustedTimes(record);
-          if (adjusted.clockIn && adjusted.clockOut) {
+          if (adjusted.clockIn && adjusted.clockOut && record.isNightWork) {
             const nHours = calculateNightHours(adjusted.clockIn, adjusted.clockOut);
             dailyNight = nHours;
             nightHours += nHours;
           }
 
-          if (isNightPremiumPaid) {
-            overtimeAllowance += Math.round(dailyOvertime * emp.hourlyWage * 0.5);
+          if (record.isNightWork) {
             nightAllowance += Math.round(dailyNight * emp.hourlyWage * 0.5);
           }
 

@@ -352,6 +352,14 @@ export default function WageStatementSheet({
                           <td className="border border-slate-400 text-right px-3 font-mono">-</td>
                         </tr>
                       ) : null}
+                      {calc.nightAllowance ? (
+                        <tr>
+                          <td className="border border-slate-400 text-center font-semibold bg-slate-50 text-indigo-700 font-bold">야간가산수당</td>
+                          <td className="border border-slate-400 text-right px-3 font-mono text-indigo-700 font-bold">+{Math.round(calc.nightAllowance).toLocaleString()}</td>
+                          <td className="border border-slate-400 text-center font-semibold bg-slate-50">-</td>
+                          <td className="border border-slate-400 text-right px-3 font-mono">-</td>
+                        </tr>
+                      ) : null}
                       {calc.paidLeaveAllowance ? (
                         <tr>
                           <td className="border border-slate-400 text-center font-semibold bg-slate-50 text-purple-700 font-bold">유급연차수당</td>
@@ -382,18 +390,16 @@ export default function WageStatementSheet({
                   <table className="w-full border-collapse mb-4 border border-slate-400 text-xs">
                     <thead>
                       <tr className="bg-slate-200">
-                        <th className="border border-slate-400 text-center py-1 font-extrabold w-[20%]">근로일수</th>
-                        <th className="border border-slate-400 text-center font-extrabold w-[20%]">총근로시간</th>
-                        <th className="border border-slate-400 text-center font-extrabold w-[20%]">연장근로시간</th>
-                        <th className="border border-slate-400 text-center font-extrabold w-[20%]">야간근로시간</th>
-                        <th className="border border-slate-400 text-center font-extrabold w-[20%]">휴일근로시간</th>
+                        <th className="border border-slate-400 text-center py-1 font-extrabold w-[25%]">근로일수</th>
+                        <th className="border border-slate-400 text-center font-extrabold w-[25%]">총근로시간</th>
+                        <th className="border border-slate-400 text-center font-extrabold w-[25%]">야간근로시간</th>
+                        <th className="border border-slate-400 text-center font-extrabold w-[25%]">휴일근로시간</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr className="font-bold">
                         <td className="border border-slate-400 text-center py-1.5">{calc.workDaysCount}일</td>
                         <td className="border border-slate-400 text-center font-mono">{workHoursTotal}시간</td>
-                        <td className="border border-slate-400 text-center font-mono text-amber-600">{calc.overtimeHours.toFixed(1)}시간</td>
                         <td className="border border-slate-400 text-center font-mono text-violet-600">{calc.nightHours.toFixed(1)}시간</td>
                         <td className="border border-slate-400 text-center font-mono text-blue-600">{calc.holidayHours.toFixed(1)}시간</td>
                       </tr>
@@ -413,17 +419,6 @@ export default function WageStatementSheet({
                       </tr>
                     </thead>
                     <tbody>
-                      <tr>
-                        <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center">연장근로수당</td>
-                        <td className="border border-slate-400 text-left px-3">
-                          {calc.overtimeHours > 0 
-                            ? `연장근로 ${calc.overtimeHours.toFixed(1)}시간 × 시급 ${emp.hourlyWage.toLocaleString()}원 × 0.5 가산`
-                            : '연장 근로 8시간 초과 누적분 없음'}
-                        </td>
-                        <td className="border border-slate-400 text-right px-3 font-mono font-bold">
-                          {Math.round(calc.overtimeAllowance || 0).toLocaleString()}
-                        </td>
-                      </tr>
                       <tr>
                         <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center">야간근로수당</td>
                         <td className="border border-slate-400 text-left px-3">

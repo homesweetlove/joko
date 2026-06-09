@@ -45,6 +45,7 @@ export interface AttendanceRecord {
   note?: string;
   isHolidayWork?: boolean; // 공휴일 근로 여부
   isPaidLeave?: boolean;   // 유급 휴가 (연차) 여부
+  isNightWork?: boolean;   // 야간 근로 가산 여부
 }
 
 export interface PayrollReport {
