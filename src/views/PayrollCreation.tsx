@@ -408,7 +408,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
     const weeks = getWeeksList();
 
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto py-8 space-y-8 animate-fade-in">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[1520px] mx-auto px-4 md:px-8 py-8 space-y-8 animate-fade-in">
         <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <div>
             <h2 className="text-2xl font-black text-slate-900 tracking-tight">출퇴근 및 주휴수당 확인</h2>
@@ -1220,7 +1220,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
 
   const renderStep4 = () => {
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-6xl mx-auto py-8 space-y-8">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-[1520px] mx-auto px-4 md:px-8 py-8 space-y-8">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h2 className="text-2xl font-bold text-slate-900">세금 및 최종 급여 확인</h2>
@@ -1592,7 +1592,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+        <div className="max-w-[1520px] mx-auto px-4 md:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
               <ChevronLeft size={24} className="text-slate-600" />
