@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Users, Calculator, Settings, ChevronRight, Upload, Download, Database, Check, FileText, Trash2, Calendar, Clock, Coffee, AlertCircle, X, Search, Printer, Building2 } from 'lucide-react';
+import { Plus, Users, Calculator, Settings, ChevronRight, Upload, Download, Database, Check, FileText, Trash2, Calendar, Clock, Coffee, AlertCircle, X, Search, Printer, Building2, FileSpreadsheet, Copy } from 'lucide-react';
 import { parse, differenceInMinutes } from 'date-fns';
 import { cn, formatCurrency } from '../lib/utils';
 import { Employee, PayrollReport } from '../types';
@@ -32,10 +32,118 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
   const [auditTaxFilter, setAuditTaxFilter] = useState<'all' | 'FREELANCER' | 'FOUR_MAJOR'>('all');
 
   const [showPayslipEmpId, setShowPayslipEmpId] = useState<string | null>(null);
+  const [taxDelegationEmpId, setTaxDelegationEmpId] = useState<string | null>(null);
+  const [taxDelegationYear, setTaxDelegationYear] = useState('2026');
+  const [taxDelegationAddress, setTaxDelegationAddress] = useState('서울특별시 마포구 백범로 31');
+  const [taxDelegationPhone, setTaxDelegationPhone] = useState('010-4567-8901');
   const [showBulkStatements, setShowBulkStatements] = useState<boolean>(false);
 
   const [selectedPayslipCalc, setSelectedPayslipCalc] = useState<{ employee: Employee; calculated: any; academyName: string } | null>(null);
   const [selectedBulkCalcs, setSelectedBulkCalcs] = useState<{ statements: { employee: Employee; calculated: any }[]; academyName: string } | null>(null);
+
+  const [copiedTransfer, setCopiedTransfer] = useState(false);
+  const [auditViewMode, setAuditViewMode] = useState<'individual' | 'analytics'>('individual');
+  const [academyRevenue, setAcademyRevenue] = useState<number>(30000000);
+
+  const handleExportReportExcel = (report: PayrollReport | null) => {
+    if (!report) return;
+
+    const headers = [
+      "조교명", "직급", "근무시간(h)", "기본수당(원)", "주휴수당(원)", 
+      "연장가산수당(원)", "야간가산수당(원)",
+      "직책수당(원)", "자격수당(원)", "업무추진비(원)", "출납수당(원)", 
+      "식대(비과세)(원)", "기타수당(원)", "수기누락금(원)", "세전 총수령액(원)", 
+      "정산 세무방식", "원천세율/보험료공제(%)", "국민연금(원)", "건강보험(원)", 
+      "장기요양(원)", "고용보험(원)", "공제 합계액(원)", "실수령액(원)",
+      "은행명", "계좌번호"
+    ].join(",");
+
+    const csvRows = [headers];
+
+    report.calculated.forEach((item: any) => {
+      const name = item.name || "";
+      const pos = item.position || "";
+      const hours = item.weeklyHours || 0;
+      const baseSalary = item.baseSalary || 0;
+      const holidayAllowance = item.holidayAllowance || 0;
+      const overtimeAllow = item.overtimeAllowance || 0;
+      const nightAllow = item.nightAllowance || 0;
+      
+      const itemized = item.itemizedAllowances || {};
+      const posAllowance = itemized.position || 0;
+      const qualAllowance = itemized.qualification || 0;
+      const bizAllowance = itemized.businessPromotion || 0;
+      const cashAllowance = itemized.cashier || 0;
+      const mealAllowance = itemized.meal || 0;
+      const otherAllowance = itemized.other || 0;
+      const omitted = itemized.omitted || 0;
+      
+      const gross = item.totalGross || 0;
+      
+      let taxTypeStr = "3.3% 프리랜서";
+      let taxRateStr = "3.3%";
+      if (item.taxType === "FOUR_MAJOR") {
+        taxTypeStr = "4대보험 공제";
+        taxRateStr = "실시간 사회보험요율";
+      } else if (item.taxType === "CUSTOM") {
+        taxTypeStr = "커스텀";
+        taxRateStr = `${item.customTaxRate || 0}%`;
+      }
+
+      const np = item.deductions?.['국민연금 (4.5%)'] || 0;
+      const hi = item.deductions?.['건강보험 (3.545%)'] || 0;
+      const ltc = item.deductions?.['장기요양보험'] || 0;
+      const ei = item.deductions?.['고용보험 (0.9%)'] || 0;
+      
+      const totalDeduction = item.totalDeduction || 0;
+      const netSalary = item.netSalary || 0;
+
+      // 찾아내는 직원 계좌 정보
+      const matchEmp = report.employees.find((e: any) => e.id === item.employeeId);
+      const bName = matchEmp?.bankName || "";
+      const bAcc = matchEmp?.bankAccount || "";
+
+      const row = [
+        `"${name}"`,
+        `"${pos}"`,
+        hours.toFixed(1),
+        baseSalary,
+        holidayAllowance,
+        overtimeAllow,
+        nightAllow,
+        posAllowance,
+        qualAllowance,
+        bizAllowance,
+        cashAllowance,
+        mealAllowance,
+        otherAllowance,
+        omitted,
+        gross,
+        `"${taxTypeStr}"`,
+        `"${taxRateStr}"`,
+        np,
+        hi,
+        ltc,
+        ei,
+        totalDeduction,
+        netSalary,
+        `"${bName}"`,
+        `"${bAcc}"`
+      ];
+
+      csvRows.push(row.join(","));
+    });
+
+    const csvContent = "\uFEFF" + csvRows.join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `급여정산감사대장_엑셀_${report.academyName || '학원'}_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   // Sync state whenever a report is clicked for 상세 감사
   useEffect(() => {
@@ -365,17 +473,28 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                       정산 리포트별 내역을 기간(연/월)과 학원 단위로 상세 추적 및 감사할 수 있습니다.
                     </p>
                   </div>
-                  <button
-                    onClick={() => {
-                      setViewingReport(null);
-                      setActiveAuditEmployeeId(null);
-                      setAuditSearchQuery('');
-                      setAuditTaxFilter('all');
-                    }}
-                    className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-all"
-                  >
-                    <X size={20} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {activeReport && (
+                      <button
+                        onClick={() => handleExportReportExcel(activeReport)}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-md shadow-emerald-950/20 cursor-pointer h-9 text-xs"
+                      >
+                        <FileSpreadsheet size={15} />
+                        엑셀(.csv) 대장 다운로드
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setViewingReport(null);
+                        setActiveAuditEmployeeId(null);
+                        setAuditSearchQuery('');
+                        setAuditTaxFilter('all');
+                      }}
+                      className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-all"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Quick Overall Stats */}
@@ -494,6 +613,118 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                         </div>
                       )}
                     </div>
+
+                    {/* 실시간 급여 정산 점유 분석 시각 인포 바 (Visual Distribution Analytics) */}
+                    {activeReport && activeReport.calculated.length > 0 && (
+                      <div className="bg-white rounded-xl p-4 border border-slate-200/60 space-y-2">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">급여 정산 구성 비율</span>
+                        {(() => {
+                          const totalBasic = activeReport.calculated.reduce((sum, c) => sum + (c.baseSalary || 0), 0);
+                          const totalHoliday = activeReport.calculated.reduce((sum, c) => sum + (c.holidayAllowance || 0), 0);
+                          const totalAllowances = activeReport.calculated.reduce((sum, c) => {
+                            const itemized = c.itemizedAllowances || {};
+                            return sum + (itemized.position || 0) + (itemized.qualification || 0) + (itemized.businessPromotion || 0) + (itemized.cashier || 0) + (itemized.meal || 0) + (itemized.other || 0) + (itemized.omitted || 0);
+                          }, 0);
+                          const totalSum = totalBasic + totalHoliday + totalAllowances;
+                          
+                          if (totalSum === 0) return null;
+
+                          const basicPct = Math.round((totalBasic / totalSum) * 100);
+                          const holidayPct = Math.round((totalHoliday / totalSum) * 100);
+                          const allowancePct = 100 - basicPct - holidayPct;
+
+                          return (
+                            <div className="space-y-2">
+                              {/* Stacked Percentage Bar */}
+                              <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden flex">
+                                <div style={{ width: `${basicPct}%` }} className="bg-blue-600 h-full" title={`기본일급: ${basicPct}%`} />
+                                <div style={{ width: `${holidayPct}%` }} className="bg-emerald-500 h-full" title={`주휴수당: ${holidayPct}%`} />
+                                <div style={{ width: `${allowancePct}%` }} className="bg-amber-500 h-full" title={`각종수당: ${allowancePct}%`} />
+                              </div>
+                              <div className="grid grid-cols-3 text-[9px] font-bold text-slate-500 text-center gap-1 leading-none pt-1">
+                                <div className="text-left text-blue-700">
+                                  <span className="inline-block w-1 h-1 rounded-full bg-blue-600 mr-1" />
+                                  기본 {basicPct}%
+                                </div>
+                                <div className="text-emerald-600">
+                                  <span className="inline-block w-1 h-1 rounded-full bg-emerald-500 mr-1" />
+                                  주휴 {holidayPct}%
+                                </div>
+                                <div className="text-right text-amber-600">
+                                  <span className="inline-block w-1 h-1 rounded-full bg-amber-500 mr-1" />
+                                  수당 {allowancePct}%
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {/* 대량 뱅킹 은행 이체를 위한 다이렉트 텍스트 복사 유틸 카드 */}
+                    {activeReport && activeReport.calculated.length > 0 && (
+                      <div className="bg-slate-900 text-white rounded-xl p-4 space-y-3 shadow-md shadow-slate-950/20">
+                        <div className="flex justify-between items-center">
+                          <h4 className="text-[11px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-1">
+                            <Building2 size={11} className="text-blue-400" />
+                            급여 즉시 송금 이체 복사
+                          </h4>
+                          <span className="px-1.5 py-0.5 bg-slate-800 text-slate-400 text-[8px] font-black rounded">기업뱅킹</span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-normal">
+                          은행 거래 시 간편하게 사용할 수 있도록 [조교명 은행명 계좌 실수령액] 한눈 텍스트를 복사합니다.
+                        </p>
+                        
+                        <button
+                          onClick={() => {
+                            const text = activeReport.calculated.map(calc => {
+                              const emp = activeReport.employees.find(e => e.id === calc.employeeId);
+                              const bank = emp?.bankName ? emp.bankName : "미등록은행";
+                              const account = emp?.bankAccount ? emp.bankAccount : "계좌미등록";
+                              return `${calc.name} ${bank} ${account} ${calc.netSalary.toLocaleString()}원`;
+                            }).join('\n');
+                            
+                            navigator.clipboard.writeText(text);
+                            setCopiedTransfer(true);
+                            setTimeout(() => setCopiedTransfer(false), 2000);
+                          }}
+                          className={cn(
+                            "w-full py-2 rounded-lg text-xs font-black tracking-tight transition-all flex items-center justify-center gap-1 cursor-pointer",
+                            copiedTransfer ? "bg-emerald-600 text-white anim-pulse" : "bg-blue-600 hover:bg-blue-750 text-white"
+                          )}
+                        >
+                          {copiedTransfer ? (
+                            <>
+                              <Check size={13} />
+                              클립보드 전체 복사 완료!
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={12} />
+                              송금 정보 다이렉트 복사
+                            </>
+                          )}
+                        </button>
+
+                        {/* Mini Quick View list */}
+                        <div className="border-t border-slate-800 pt-2 space-y-1.5 max-h-24 overflow-y-auto pr-1 text-[10px] font-medium text-slate-300 divide-y divide-slate-800/50">
+                          {activeReport.calculated.map(calc => {
+                            const emp = activeReport.employees.find(e => e.id === calc.employeeId);
+                            return (
+                              <div key={calc.employeeId} className="flex justify-between items-center text-slate-400 pt-1.5">
+                                <span className="font-extrabold text-slate-200">{calc.name}</span>
+                                <span className="text-[9px] text-slate-500 truncate max-w-[70px] text-center">
+                                  {emp?.bankName ? emp.bankName : '계좌 없음'}
+                                </span>
+                                <span className="font-mono text-blue-300 text-[10px] text-right">
+                                  {calc.netSalary.toLocaleString()}원
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Column 2: Selected Academy Employees List */}
@@ -613,189 +844,538 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                         );
                       }
 
-                      const selectedCalc = activeReport.calculated.find(c => c.employeeId === activeAuditEmployeeId);
-                      const selectedEmp = activeReport.employees.find(e => e.id === activeAuditEmployeeId);
-                      if (!selectedCalc) {
-                        return (
-                          <div className="text-center py-20 text-slate-400 text-sm font-semibold">
-                            왼쪽의 직원 목록에서 급여를 상세 감사할 대상을 기정하십시오.
-                          </div>
-                        );
-                      }
-
-                      // Get attendance log for this person
-                      const personAttendance = activeReport.attendance.filter(att => att.employeeId === activeAuditEmployeeId);
-                      const hStat = activeReport.weeklyHolidayStatus[selectedCalc.employeeId]?.[0] !== false;
-
                       return (
                         <div className="space-y-6">
-                          {/* TA Metadata Card */}
-                          <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-xs flex flex-wrap justify-between items-center gap-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-12 h-12 bg-slate-900 text-white rounded-xl flex items-center justify-center font-bold text-xl shadow-xs">
-                                {selectedCalc.name[0]}
-                              </div>
-                              <div>
-                                <h4 className="text-xl font-bold text-slate-900">{selectedCalc.name} <span className="text-xs text-slate-500 font-normal">{selectedCalc.position}</span></h4>
-                                <p className="text-xs text-slate-400">주민번호: {selectedEmp?.ssn.split('-')[0]}-******* · 입사일: {selectedEmp?.hireDate}</p>
-                              </div>
-                            </div>
-                            
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs font-bold text-slate-600">
-                              <div>
-                                <span className="text-slate-400 font-medium block">시정 시급</span>
-                                <span className="text-slate-800">{selectedEmp?.hourlyWage.toLocaleString()}원</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 font-medium block">주휴일자</span>
-                                <span className="text-slate-800">{selectedEmp?.weeklyHoliday}요일</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 font-medium block">세금설정</span>
-                                <span className="text-blue-600">{selectedCalc.taxType === 'FREELANCER' ? '3.3% 사업소득세' : '4대보험 공제'}</span>
-                              </div>
-                            </div>
+                          {/* Tab selectors */}
+                          <div className="flex bg-slate-100 p-1 rounded-xl gap-1 border border-slate-200 w-full sm:w-fit">
+                            <button
+                              onClick={() => setAuditViewMode('individual')}
+                              className={cn(
+                                "flex-grow sm:flex-grow-0 px-4 py-2 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 h-8",
+                                auditViewMode === 'individual'
+                                  ? "bg-white text-slate-900 shadow-sm border border-slate-200/40 font-extrabold"
+                                  : "text-slate-500 hover:text-slate-800"
+                              )}
+                            >
+                              <Users size={13} className="text-blue-600" />
+                              개별 명세 감사
+                            </button>
+                            <button
+                              onClick={() => setAuditViewMode('analytics')}
+                              className={cn(
+                                "flex-grow sm:flex-grow-0 px-4 py-2 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 h-8",
+                                auditViewMode === 'analytics'
+                                  ? "bg-white text-slate-900 shadow-sm border border-slate-200/40 font-extrabold"
+                                  : "text-slate-500 hover:text-slate-800"
+                              )}
+                            >
+                              <Calculator size={13} className="text-emerald-600" />
+                              대시보드 통계 및 인건비 분석
+                            </button>
                           </div>
 
-                          {/* Attendance Logs Details (Where numbers were entered) */}
-                          <div className="space-y-3">
-                            <div className="flex justify-between items-center">
-                              <h5 className="font-bold text-slate-800 flex items-center gap-2">
-                                <Calendar size={16} className="text-blue-600" />
-                                입력된 근태 기록 및 설정 감사시트
-                              </h5>
-                              <span className="text-xs text-slate-500">주 근무시간: <strong className="text-slate-900 text-sm font-black">{selectedCalc.weeklyHours.toFixed(1)}시간</strong></span>
-                            </div>
-                            <div className="border border-slate-150 rounded-xl overflow-hidden text-xs bg-white shadow-xs">
-                              <table className="w-full text-left border-collapse">
-                                <thead>
-                                  <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
-                                    <th className="px-4 py-3">근무 일자</th>
-                                    <th className="px-4 py-3">출근 기록</th>
-                                    <th className="px-4 py-3">퇴근 기록</th>
-                                    <th className="px-4 py-3">휴게 적용여부 (4h당 30m)</th>
-                                    <th className="px-4 py-3">차감 후 실시간</th>
-                                    <th className="px-4 py-3">상태</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {personAttendance.length === 0 ? (
-                                    <tr>
-                                      <td colSpan={6} className="text-center py-6 text-slate-400">당시 정산기록에 상세 행 데이터가 누락되었습니다.</td>
-                                    </tr>
-                                  ) : (
-                                    personAttendance.map((att) => (
-                                      <tr key={att.date} className="border-t border-slate-100 hover:bg-slate-50/40">
-                                        <td className="px-4 py-3 font-semibold text-slate-800">{att.date}</td>
-                                        <td className="px-4 py-3 font-bold text-slate-700">{att.clockIn || '-'}</td>
-                                        <td className="px-4 py-3 font-bold text-slate-700">{att.clockOut || '-'}</td>
-                                        <td className="px-4 py-3">
-                                          <span className={cn(
-                                            "px-2 py-0.5 rounded text-[10px] font-black",
-                                            att.hasBreak ? "bg-orange-50 text-orange-600 border border-orange-200" : "bg-slate-100 text-slate-400"
-                                          )}>
-                                            {att.hasBreak ? 'Break Y' : 'Break N'}
-                                          </span>
-                                        </td>
-                                        <td className="px-4 py-3 font-black text-slate-900">
-                                          {att.clockIn && att.clockOut ? (
-                                            // Simple recalculation render
-                                            (() => {
-                                              const start = parse(att.clockIn, 'HH:mm', new Date());
-                                              const end = parse(att.clockOut, 'HH:mm', new Date());
-                                              let diff = differenceInMinutes(end, start);
-                                              if (att.hasBreak) {
-                                                if (diff >= 480) diff -= 60;
-                                                else if (diff >= 240) diff -= 30;
-                                              }
-                                              return `${Math.max(0, diff / 60).toFixed(1)}h`;
-                                            })()
-                                          ) : '-'}
-                                        </td>
-                                        <td className="px-4 py-3">
-                                          {att.isAbsence ? (
-                                            <span className="px-2 py-0.5 bg-red-100 text-red-600 font-bold rounded">결석</span>
-                                          ) : (
-                                            <span className="px-2 py-0.5 bg-green-100 text-green-600 font-bold rounded">정상</span>
-                                          )}
-                                        </td>
-                                      </tr>
-                                    ))
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
+                          {auditViewMode === 'analytics' ? (
+                            (() => {
+                              // A. Time-of-day Shift Density Heatmap
+                              const daysLabels = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일'];
+                              
+                              // We will have 6 time slots
+                              const timeSlots = [
+                                { label: '06:00 - 09:00', labelShort: '오픈', start: 6, end: 9 },
+                                { label: '09:00 - 12:00', labelShort: '오전', start: 9, end: 12 },
+                                { label: '12:00 - 15:00', labelShort: '오후교대', start: 12, end: 15 },
+                                { label: '15:00 - 18:00', labelShort: '오후/피크', start: 15, end: 18 },
+                                { label: '18:00 - 21:00', labelShort: '저녁/정점', start: 18, end: 21 },
+                                { label: '21:00 - 24:00', labelShort: '야간/마감', start: 21, end: 24 }
+                              ];
 
-                          {/* Financial Ledger Formulas */}
-                          <div className="grid md:grid-cols-2 gap-4">
-                            {/* Left: Salary elements */}
-                            <div className="p-5 bg-blue-50/50 rounded-2xl border border-blue-150 text-xs space-y-3">
-                              <h6 className="font-bold text-blue-900 flex items-center gap-1.5 text-sm">
-                                <Calculator size={14} className="text-blue-600" />
-                                지급 산식 공식
-                              </h6>
-                              <div className="flex justify-between">
-                                <span className="text-slate-500">기본급 ({selectedCalc.weeklyHours.toFixed(1)}시간)</span>
-                                <span className="font-extrabold text-slate-800">{formatCurrency(selectedCalc.baseSalary)}</span>
-                              </div>
-                              <div className="flex justify-between items-center">
-                                <span className="text-slate-500 flex items-center gap-2">
-                                  주휴수당 지급 여부
-                                  <span className={cn(
-                                    "px-2 py-0.5 rounded text-[9px] font-black",
-                                    hStat ? "bg-blue-600 text-white" : "bg-red-500 text-white"
-                                  )}>
-                                    {hStat ? '지급 Y' : '미자격/제외 N'}
-                                  </span>
-                                </span>
-                                <span className="font-extrabold text-slate-800">{formatCurrency(selectedCalc.holidayAllowance)}</span>
-                              </div>
-                              <hr className="border-blue-105" />
-                              <div className="flex justify-between text-base font-black text-blue-900">
-                                <span>세전 총급여</span>
-                                <span>{formatCurrency(selectedCalc.totalGross)}</span>
-                              </div>
-                            </div>
+                              const dayMapping = [1, 2, 3, 4, 5, 6, 0]; // Monday to Sunday
 
-                            {/* Right: Deductions elements */}
-                            <div className="p-5 bg-red-50/50 rounded-2xl border border-red-150 text-xs space-y-3">
-                              <h6 className="font-bold text-red-900 flex items-center gap-1.5 text-sm">
-                                <Clock size={14} className="text-red-500" />
-                                공제 세금 및 영수 법정 요율
-                              </h6>
-                              {Object.entries(selectedCalc.deductions).map(([taxName, amt]) => (
-                                <div key={taxName} className="flex justify-between">
-                                  <span className="text-slate-500">{taxName}</span>
-                                  <span className="font-extrabold text-red-600">-{formatCurrency(amt as number)}</span>
+                              // Build overlaps count
+                              const overlapGrid: Record<number, Record<number, number>> = {};
+                              
+                              dayMapping.forEach(day => {
+                                overlapGrid[day] = {};
+                                timeSlots.forEach((_, sIdx) => {
+                                  overlapGrid[day][sIdx] = 0;
+                                });
+                              });
+
+                              activeReport.attendance.forEach(record => {
+                                if (record.isAbsence || !record.clockIn || !record.clockOut) return;
+                                try {
+                                  const d = parse(record.date, 'yyyy-MM-dd', new Date());
+                                  const dayOfWeek = d.getDay();
+                                  
+                                  const [sh, sm] = record.clockIn.split(':').map(Number);
+                                  const [eh, em] = record.clockOut.split(':').map(Number);
+                                  const recStartMin = sh * 60 + sm;
+                                  let recEndMin = eh * 60 + em;
+                                  if (recEndMin < recStartMin) recEndMin += 24 * 60;
+
+                                  timeSlots.forEach((slot, sIdx) => {
+                                    const slotStartMin = slot.start * 60;
+                                    const slotEndMin = slot.end * 60;
+                                    
+                                    const isOverlap = Math.max(recStartMin, slotStartMin) < Math.min(recEndMin, slotEndMin);
+                                    if (isOverlap) {
+                                      if (overlapGrid[dayOfWeek] !== undefined) {
+                                        overlapGrid[dayOfWeek][sIdx] = (overlapGrid[dayOfWeek][sIdx] || 0) + 1;
+                                      }
+                                    }
+                                  });
+                                } catch (e) {}
+                              });
+
+                              // B. Wage distribution by Rank/Spec
+                              const ranks: Record<string, { totalWage: number, count: number, employees: string[] }> = {};
+                              activeReport.employees.forEach(emp => {
+                                const rank = emp.position || '일반조교';
+                                if (!ranks[rank]) {
+                                  ranks[rank] = { totalWage: 0, count: 0, employees: [] };
+                                }
+                                ranks[rank].totalWage += emp.hourlyWage;
+                                ranks[rank].count += 1;
+                                ranks[rank].employees.push(emp.name);
+                              });
+
+                              const rankStatsList = Object.entries(ranks).map(([name, r]) => ({
+                                name,
+                                avgHourlyWage: Math.round(r.totalWage / r.count),
+                                count: r.count,
+                                employeeNames: r.employees.join(', ')
+                              })).sort((a, b) => b.avgHourlyWage - a.avgHourlyWage);
+
+                              const maxWage = Math.max(...rankStatsList.map(r => r.avgHourlyWage), 10000);
+
+                              // C. L/R Ratio & Trend
+                              const totalLaborCosts = activeReport.calculated.reduce((sum, item) => sum + item.totalGross, 0);
+                              const lrRatio = (totalLaborCosts / academyRevenue) * 100;
+
+                              let lrStatus = { text: '최적 (Optimized)', color: 'text-emerald-700 bg-emerald-50 border-emerald-100', barColor: 'bg-emerald-500' };
+                              if (lrRatio > 40) {
+                                lrStatus = { text: '위험 (High Risk)', color: 'text-red-700 bg-red-50 border-red-100', barColor: 'bg-red-500' };
+                              } else if (lrRatio > 30) {
+                                lrStatus = { text: '주의 (Caution)', color: 'text-amber-700 bg-amber-50 border-amber-100', barColor: 'bg-amber-500' };
+                              }
+
+                              const academyHistory = reports
+                                .filter(r => r.academyName === activeReport.academyName)
+                                .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+                              return (
+                                <div className="space-y-6">
+                                  {/* L/R Ratio Section */}
+                                  <div className="bg-white p-6 rounded-2xl border border-slate-150 shadow-sm space-y-6">
+                                    <div className="flex flex-wrap justify-between items-start gap-4">
+                                      <div className="space-y-1">
+                                        <h4 className="text-base font-extrabold text-slate-900 flex items-center gap-1.5">
+                                          <Calculator size={18} className="text-blue-600" />
+                                          학원별 인건비 점유율 (L/R Ratio) 실시간 분석
+                                        </h4>
+                                        <p className="text-xs text-slate-500">
+                                          총지급 인건비가 당월 학원 매출(Revenue) 대비 차지하는 비율이며, 30% 이하가 가장 우수한 수익 구조입니다.
+                                        </p>
+                                      </div>
+                                      
+                                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col gap-2 w-full sm:w-auto">
+                                        <div className="flex justify-between items-center text-xs text-slate-500 gap-6">
+                                          <span className="font-bold">당월 학원 매출 입력</span>
+                                          <span className="font-mono text-slate-900 font-extrabold text-sm">{formatCurrency(academyRevenue)}</span>
+                                        </div>
+                                        <input
+                                          type="range"
+                                          min={10000000}
+                                          max={150000000}
+                                          step={5000000}
+                                          value={academyRevenue}
+                                          onChange={(e) => setAcademyRevenue(Number(e.target.value))}
+                                          className="w-full accent-blue-600 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                                        />
+                                        <div className="flex justify-between text-[8px] font-bold text-slate-400 leading-none">
+                                          <span>1,000만</span>
+                                          <span>5,000만</span>
+                                          <span>1억</span>
+                                          <span>1.5억</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                      <div className="p-4 bg-slate-50/50 border border-slate-150 rounded-xl flex flex-col justify-between">
+                                        <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider block">총 인건비 선지급액 (세전)</span>
+                                        <span className="text-2xl font-black text-slate-900 mt-2 font-mono">{formatCurrency(totalLaborCosts)}</span>
+                                        <span className="text-[11px] text-slate-500 mt-1 block">현재 {activeReport.calculated.length}명의 급여 전표 대장 합계</span>
+                                      </div>
+
+                                      <div className="p-4 bg-slate-50/50 border border-slate-150 rounded-xl text-center flex flex-col justify-center items-center">
+                                        <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-black">인건비 점유율 (L/R Ratio)</span>
+                                        <div className="text-3xl font-black text-blue-700 mt-2 font-mono">{lrRatio.toFixed(1)}%</div>
+                                        <span className={cn("text-[9px] font-black px-2.5 py-0.5 rounded-full mt-1.5 border block w-fit mx-auto leading-none", lrStatus.color)}>
+                                          {lrStatus.text}
+                                        </span>
+                                      </div>
+
+                                      <div className="p-4 bg-slate-50/50 border border-slate-150 rounded-xl space-y-2 flex flex-col justify-center">
+                                        <span className="text-[10px] text-slate-400 uppercase tracking-wider block">점유 비중 등급 기준표</span>
+                                        <div className="space-y-1 text-[11px] font-semibold text-slate-600 leading-none">
+                                          <div className="flex justify-between items-center"><span className="text-emerald-600 font-bold flex items-center gap-1">● 0% ~ 30%</span> <span>최적 구조</span></div>
+                                          <div className="flex justify-between items-center"><span className="text-amber-500 font-bold flex items-center gap-1">● 30% ~ 40%</span> <span>경계 주의</span></div>
+                                          <div className="flex justify-between items-center"><span className="text-red-500 font-bold flex items-center gap-1">● 40% 초과</span> <span>비용 고밀도</span></div>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* History Trend tracker */}
+                                    {academyHistory.length > 1 && (
+                                      <div className="border-t border-slate-150 pt-4 space-y-3">
+                                        <span className="text-xs font-black text-slate-400 uppercase tracking-widest block">인건비 및 L/R Ratio 등급 추이 분석 ({academyHistory.length}회 이력)</span>
+                                        <div className="flex items-end gap-3 h-28 pt-4 pb-2 px-4 overflow-x-auto bg-slate-50 border border-slate-150 rounded-xl">
+                                          {academyHistory.map((hist) => {
+                                            const histTotal = hist.calculated.reduce((sum, item) => sum + item.totalGross, 0);
+                                            const histRatio = Math.min((histTotal / academyRevenue) * 100, 100);
+                                            const dt = new Date(hist.createdAt);
+                                            const formatLabel = `${dt.getMonth() + 1}/${dt.getDate()}`;
+                                            const isSelected = hist.id === activeReport.id;
+
+                                            return (
+                                              <div key={hist.id} className="flex-1 min-w-[50px] flex flex-col items-center gap-2 group h-full justify-end">
+                                                <div className="w-full relative flex justify-center items-end h-[75%]">
+                                                  <div className="absolute bottom-full mb-1 opacity-0 group-hover:opacity-100 bg-slate-900 text-white text-[9px] px-1.5 py-0.5 rounded font-black transition-opacity whitespace-nowrap z-10">
+                                                    {histRatio.toFixed(1)}% ({formatCurrency(histTotal)})
+                                                  </div>
+                                                  <div
+                                                    className={cn(
+                                                      "w-5 rounded-t-md transition-all duration-300",
+                                                      isSelected ? "bg-blue-600 scale-x-110 shadow-sm" : "bg-slate-300 hover:bg-slate-450"
+                                                    )}
+                                                    style={{ height: `${Math.max(histRatio, 15)}%` }}
+                                                  />
+                                                </div>
+                                                <span className={cn("text-[9px] font-black", isSelected ? "text-blue-600 font-black scale-105" : "text-slate-400")}>
+                                                  {formatLabel}
+                                                </span>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Heatmap Section */}
+                                  <div className="bg-white p-6 rounded-2xl border border-slate-150 shadow-sm space-y-4">
+                                    <div className="space-y-1">
+                                      <h4 className="text-base font-extrabold text-slate-900 flex items-center gap-1.5">
+                                        <Clock size={18} className="text-blue-600" />
+                                        요일 및 소정/실근무 시간대별 조교 배치 집중 피크 타임 히트맵
+                                      </h4>
+                                      <p className="text-xs text-slate-500">
+                                        출퇴근 기록 데이터에서 요일별 조교들의 인력 밀도를 추출하여, 어느 시간대에 보조 인력이 가장 조밀하게 집중되어 있는지 보여줍니다.
+                                      </p>
+                                    </div>
+
+                                    <div className="overflow-x-auto pb-2">
+                                      <table className="w-full border-collapse">
+                                        <thead>
+                                          <tr>
+                                            <th className="p-2 text-left text-[10px] font-black text-slate-400 bg-slate-50 border border-slate-150 uppercase tracking-widest min-w-[100px]">근무 요일 / 시간대</th>
+                                            {timeSlots.map((slot, sIdx) => (
+                                              <th key={sIdx} className="p-2 text-center text-[10px] font-black text-slate-600 bg-slate-50 border border-slate-150">
+                                                <div className="font-mono text-slate-800">{slot.labelShort}</div>
+                                                <div className="text-[8px] text-slate-400 font-semibold mt-0.5">{slot.label}</div>
+                                              </th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {dayMapping.map((dayNum) => {
+                                            const dayLabel = daysLabels[dayNum === 0 ? 6 : dayNum - 1];
+                                            const isWeekend = dayNum === 0 || dayNum === 6;
+
+                                            return (
+                                              <tr key={dayNum} className="hover:bg-slate-50/50 transition-colors">
+                                                <td className={cn(
+                                                  "p-2 text-xs font-black border border-slate-150",
+                                                  isWeekend ? "text-red-500 bg-red-50/10 font-black" : "text-slate-700 bg-slate-50/30"
+                                                )}>
+                                                  {dayLabel}
+                                                </td>
+                                                {timeSlots.map((_, sIdx) => {
+                                                  const count = overlapGrid[dayNum]?.[sIdx] || 0;
+                                                  
+                                                  let cellStyle = "bg-slate-50/50 text-slate-350 border-slate-100";
+                                                  if (count >= 3) {
+                                                    cellStyle = "bg-blue-600 text-white font-black";
+                                                  } else if (count === 2) {
+                                                    cellStyle = "bg-blue-200 text-blue-800 font-bold border-blue-300";
+                                                  } else if (count === 1) {
+                                                    cellStyle = "bg-blue-50 text-blue-700 font-semibold border-blue-100";
+                                                  }
+
+                                                  return (
+                                                    <td
+                                                      key={sIdx}
+                                                      className={cn(
+                                                        "p-4 text-center text-xs border border-slate-150 transition-all font-mono",
+                                                        cellStyle
+                                                      )}
+                                                      title={`${dayLabel} ${timeSlots[sIdx].label} 조교 배치: ${count}명`}
+                                                    >
+                                                      {count === 0 ? '-' : `${count}명`}
+                                                    </td>
+                                                  );
+                                                })}
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-4 text-[9px] font-black text-slate-400 pt-1 border-t border-slate-100">
+                                      <span>범정 밀도:</span>
+                                      <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-slate-50 border border-slate-200 rounded" /> 미배치 (-)</span>
+                                      <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-blue-50 border border-blue-100 rounded" /> 1명 근무</span>
+                                      <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-blue-200 border border-blue-200 rounded" /> 2명 공동 근무</span>
+                                      <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-blue-600 rounded" /> 3명 이상 피크 가용 인원</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Average wage distribution */}
+                                  <div className="bg-white p-6 rounded-2xl border border-slate-150 shadow-sm space-y-4">
+                                    <div className="space-y-1">
+                                      <h4 className="text-base font-extrabold text-slate-900 flex items-center gap-1.5">
+                                        <Users size={18} className="text-blue-600" />
+                                        조교 직급 및 스펙별 평균 시급 분포 차트
+                                      </h4>
+                                      <p className="text-xs text-slate-500">
+                                        동일 학원 직무 직급군별 조교들의 인원 분포와 평균 시급의 불균형 지표를 확인하여 평정 근로비를 설정합니다.
+                                      </p>
+                                    </div>
+
+                                    <div className="space-y-4 pt-1">
+                                      {rankStatsList.map((stat, rIdx) => {
+                                        const percentage = Math.round((stat.avgHourlyWage / maxWage) * 100);
+
+                                        return (
+                                          <div key={rIdx} className="space-y-1.5 hover:translate-x-0.5 transition-transform duration-100">
+                                            <div className="flex justify-between items-baseline text-xs font-black leading-none">
+                                              <span className="text-slate-800 flex items-baseline gap-2">
+                                                <span className="font-extrabold text-sm">{stat.name}</span>
+                                                <span className="text-[10px] text-slate-400 font-bold">{stat.count}명 ({stat.employeeNames})</span>
+                                              </span>
+                                              <span className="text-blue-600 font-mono font-black text-sm">{stat.avgHourlyWage.toLocaleString()}원</span>
+                                            </div>
+
+                                            <div className="h-3.5 w-full bg-slate-100 rounded-full overflow-hidden flex relative items-center">
+                                              <div
+                                                style={{ width: `${percentage}%` }}
+                                                className="bg-blue-600 h-full rounded-full transition-all duration-500"
+                                              />
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
                                 </div>
-                              ))}
-                              <hr className="border-red-105" />
-                              <div className="flex justify-between text-base font-black text-red-600">
-                                <span>공제 합계액</span>
-                                <span>-{formatCurrency(selectedCalc.totalDeduction)}</span>
-                              </div>
-                            </div>
-                          </div>
+                              );
+                            })()
+                          ) : (
+                            (() => {
+                              const selectedCalc = activeReport.calculated.find(c => c.employeeId === activeAuditEmployeeId);
+                              const selectedEmp = activeReport.employees.find(e => e.id === activeAuditEmployeeId);
+                              if (!selectedCalc) {
+                                return (
+                                  <div className="text-center py-20 text-slate-400 text-sm font-semibold border-2 border-dashed border-slate-200/60 bg-white/40 p-12 rounded-2xl">
+                                    왼쪽의 조교 목록에서 급여를 상세 감사할 대상을 지정하십시오.
+                                  </div>
+                                );
+                              }
 
-                          {/* Final Result Card */}
-                          <div className="p-6 bg-slate-900 text-white rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-4">
-                            <div>
-                              <span className="text-slate-400 text-xs font-bold block uppercase tracking-widest mb-1">실 수령급여 산출액</span>
-                              <span className="text-slate-300 text-xs font-semibold">{formatCurrency(selectedCalc.totalGross)} (세전) - {formatCurrency(selectedCalc.totalDeduction)} (공제)</span>
-                            </div>
-                            <div className="text-right flex flex-wrap gap-3 items-center justify-end">
-                              <button
-                                onClick={() => setShowPayslipEmpId(selectedCalc.employeeId)}
-                                className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-md cursor-pointer"
-                              >
-                                <Printer size={13} />
-                                법정 임금명세서 인쇄
-                              </button>
-                              <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded font-black uppercase tracking-widest">NET PAY</span>
-                              <span className="text-3xl font-black text-white leading-none inline-block">{formatCurrency(selectedCalc.netSalary)}</span>
-                            </div>
-                          </div>
+                              const personAttendance = activeReport.attendance.filter(att => att.employeeId === activeAuditEmployeeId);
+                              const hStat = activeReport.weeklyHolidayStatus[selectedCalc.employeeId]?.[0] !== false;
+
+                              return (
+                                <>
+                                  {/* TA Metadata Card */}
+                                  <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-xs flex flex-wrap justify-between items-center gap-4">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-12 h-12 bg-slate-900 text-white rounded-xl flex items-center justify-center font-bold text-xl shadow-xs">
+                                        {selectedCalc.name[0]}
+                                      </div>
+                                      <div>
+                                        <h4 className="text-xl font-bold text-slate-900">{selectedCalc.name} <span className="text-xs text-slate-500 font-normal">{selectedCalc.position}</span></h4>
+                                        <p className="text-xs text-slate-400">주민번호: {selectedEmp?.ssn.split('-')[0]}-******* · 입사일: {selectedEmp?.hireDate}</p>
+                                      </div>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs font-bold text-slate-600">
+                                      <div>
+                                        <span className="text-slate-400 font-medium block">시정 시급</span>
+                                        <span className="text-slate-800">{selectedEmp?.hourlyWage.toLocaleString()}원</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-slate-400 font-medium block">주휴일자</span>
+                                        <span className="text-slate-800">{selectedEmp?.weeklyHoliday}요일</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-slate-400 font-medium block">세금설정</span>
+                                        <span className="text-blue-600">{selectedCalc.taxType === 'FREELANCER' ? '3.3% 사업소득세' : '4대보험 공제'}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Attendance Logs Details (Where numbers were entered) */}
+                                  <div className="space-y-3">
+                                    <div className="flex justify-between items-center">
+                                      <h5 className="font-bold text-slate-800 flex items-center gap-2">
+                                        <Calendar size={16} className="text-blue-600" />
+                                        입력된 근태 기록 및 설정 감사시트
+                                      </h5>
+                                      <span className="text-xs text-slate-500">주 근무시간: <strong className="text-slate-900 text-sm font-black">{selectedCalc.weeklyHours.toFixed(1)}시간</strong></span>
+                                    </div>
+                                    <div className="border border-slate-150 rounded-xl overflow-hidden text-xs bg-white shadow-xs">
+                                      <table className="w-full text-left border-collapse">
+                                        <thead>
+                                          <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
+                                            <th className="px-4 py-3">근무 일자</th>
+                                            <th className="px-4 py-3">출근 기록</th>
+                                            <th className="px-4 py-3">퇴근 기록</th>
+                                            <th className="px-4 py-3">휴게 적용여부 (4h당 30m)</th>
+                                            <th className="px-4 py-3">차감 후 실시간</th>
+                                            <th className="px-4 py-3">상태</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {personAttendance.length === 0 ? (
+                                            <tr>
+                                              <td colSpan={6} className="text-center py-6 text-slate-400">당시 정산기록에 상세 행 데이터가 누락되었습니다.</td>
+                                            </tr>
+                                          ) : (
+                                            personAttendance.map((att) => (
+                                              <tr key={att.date} className="border-t border-slate-100 hover:bg-slate-50/40">
+                                                <td className="px-4 py-3 font-semibold text-slate-800">{att.date}</td>
+                                                <td className="px-4 py-3 font-bold text-slate-700">{att.clockIn || '-'}</td>
+                                                <td className="px-4 py-3 font-bold text-slate-700">{att.clockOut || '-'}</td>
+                                                <td className="px-4 py-3">
+                                                  <span className={cn(
+                                                    "px-2 py-0.5 rounded text-[10px] font-black",
+                                                    att.hasBreak ? "bg-orange-50 text-orange-600 border border-orange-200" : "bg-slate-100 text-slate-400"
+                                                  )}>
+                                                    {att.hasBreak ? 'Break Y' : 'Break N'}
+                                                  </span>
+                                                </td>
+                                                <td className="px-4 py-3 font-black text-slate-900">
+                                                  {att.clockIn && att.clockOut ? (
+                                                    (() => {
+                                                      const start = parse(att.clockIn, 'HH:mm', new Date());
+                                                      const end = parse(att.clockOut, 'HH:mm', new Date());
+                                                      let diff = differenceInMinutes(end, start);
+                                                      if (att.hasBreak) {
+                                                        if (diff >= 480) diff -= 60;
+                                                        else if (diff >= 240) diff -= 30;
+                                                      }
+                                                      return `${Math.max(0, diff / 60).toFixed(1)}h`;
+                                                    })()
+                                                  ) : '-'}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                  {att.isAbsence ? (
+                                                    <span className="px-2 py-0.5 bg-red-100 text-red-600 font-bold rounded">결석</span>
+                                                  ) : (
+                                                    <span className="px-2 py-0.5 bg-green-100 text-green-600 font-bold rounded">정상</span>
+                                                  )}
+                                                </td>
+                                              </tr>
+                                            ))
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+
+                                  {/* Financial Ledger Formulas */}
+                                  <div className="grid md:grid-cols-2 gap-4">
+                                    <div className="p-5 bg-blue-50/50 rounded-2xl border border-blue-150 text-xs space-y-3">
+                                      <h6 className="font-bold text-blue-900 flex items-center gap-1.5 text-sm">
+                                        <Calculator size={14} className="text-blue-600" />
+                                        지급 산식 공식
+                                      </h6>
+                                      <div className="flex justify-between">
+                                        <span className="text-slate-500">기본급 ({selectedCalc.weeklyHours.toFixed(1)}시간)</span>
+                                        <span className="font-extrabold text-slate-800">{formatCurrency(selectedCalc.baseSalary)}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-slate-500 flex items-center gap-2">
+                                          주휴수당 지급 여부
+                                          <span className={cn(
+                                            "px-2 py-0.5 rounded text-[9px] font-black",
+                                            hStat ? "bg-blue-600 text-white" : "bg-red-500 text-white"
+                                          )}>
+                                            {hStat ? '지급 Y' : '미자격/제외 N'}
+                                          </span>
+                                        </span>
+                                        <span className="font-extrabold text-slate-800">{formatCurrency(selectedCalc.holidayAllowance)}</span>
+                                      </div>
+                                      <hr className="border-blue-105" />
+                                      <div className="flex justify-between text-base font-black text-blue-900">
+                                        <span>세전 총급여</span>
+                                        <span>{formatCurrency(selectedCalc.totalGross)}</span>
+                                      </div>
+                                    </div>
+
+                                    <div className="p-5 bg-red-50/50 rounded-2xl border border-red-150 text-xs space-y-3">
+                                      <h6 className="font-bold text-red-900 flex items-center gap-1.5 text-sm">
+                                        <Clock size={14} className="text-red-500" />
+                                        공제 세금 및 영수 법정 요율
+                                      </h6>
+                                      {Object.entries(selectedCalc.deductions).map(([taxName, amt]) => (
+                                        <div key={taxName} className="flex justify-between">
+                                          <span className="text-slate-500">{taxName}</span>
+                                          <span className="font-extrabold text-red-600">-{formatCurrency(amt as number)}</span>
+                                        </div>
+                                      ))}
+                                      <hr className="border-red-105" />
+                                      <div className="flex justify-between text-base font-black text-red-600">
+                                        <span>공제 합계액</span>
+                                        <span>-{formatCurrency(selectedCalc.totalDeduction)}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Final Result Card */}
+                                  <div className="p-6 bg-slate-900 text-white rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-4">
+                                    <div>
+                                      <span className="text-slate-400 text-xs font-bold block uppercase tracking-widest mb-1">실 수령급여 산출액</span>
+                                      <span className="text-slate-300 text-xs font-semibold">{formatCurrency(selectedCalc.totalGross)} (세전) - {formatCurrency(selectedCalc.totalDeduction)} (공제)</span>
+                                    </div>
+                                    <div className="text-right flex flex-wrap gap-3 items-center justify-end">
+                                      <button
+                                        onClick={() => {
+                                          setTaxDelegationEmpId(selectedCalc.employeeId);
+                                          setTaxDelegationYear('25');
+                                        }}
+                                        className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-orange-400 font-bold text-xs rounded-xl transition-all shadow-md cursor-pointer"
+                                      >
+                                        <FileText size={13} className="text-orange-400" />
+                                        위임 신고 자료 패키지
+                                      </button>
+                                      <button
+                                        onClick={() => setShowPayslipEmpId(selectedCalc.employeeId)}
+                                        className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-md cursor-pointer"
+                                      >
+                                        <Printer size={13} />
+                                        법정 임금명세서 인쇄
+                                      </button>
+                                      <span className="text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded font-black uppercase tracking-widest">NET PAY</span>
+                                      <span className="text-3xl font-black text-white leading-none inline-block">{formatCurrency(selectedCalc.netSalary)}</span>
+                                    </div>
+                                  </div>
+                                </>
+                              );
+                            })()
+                          )}
                         </div>
                       );
                     })()}
@@ -858,6 +1438,236 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
           />
         );
       })()}
+
+      {/* 3. Year-End Tax Settlement TA Delegation / Reporting Package Generator */}
+      <AnimatePresence>
+        {taxDelegationEmpId && (() => {
+          // Find employee
+          const emp = employees.find(e => e.id === taxDelegationEmpId);
+          if (!emp) return null;
+
+          // Gather all calculation matching this employee across all reports
+          // Sum up metrics for the year-end report
+          const annualSummary = reports.reduce((acc, rep) => {
+            const calc = rep.calculated.find(c => c.employeeId === taxDelegationEmpId);
+            if (calc) {
+              acc.hours += (calc.totalMinutes || 0) / 60;
+              acc.baseSalary += calc.baseSalary || 0;
+              acc.holidayAllowance += calc.holidayAllowance || 0;
+              acc.overtimeAllowance += calc.overtimeAllowance || 0;
+              acc.nightAllowance += calc.nightAllowance || 0;
+              acc.allowancesAmount += calc.allowancesAmount || 0;
+              acc.totalGross += calc.totalGross || 0;
+              acc.totalDeduction += calc.totalDeduction || 0;
+              acc.netSalary += calc.netSalary || 0;
+              acc.monthsCount += 1;
+              
+              // Deductions detailed breakdown
+              if (calc.deductions) {
+                Object.entries(calc.deductions).forEach(([key, val]) => {
+                  acc.deductionsBreakdown[key] = (acc.deductionsBreakdown[key] || 0) + (val as number);
+                });
+              }
+            }
+            return acc;
+          }, {
+            hours: 0,
+            baseSalary: 0,
+            holidayAllowance: 0,
+            overtimeAllowance: 0,
+            nightAllowance: 0,
+            allowancesAmount: 0,
+            totalGross: 0,
+            totalDeduction: 0,
+            netSalary: 0,
+            monthsCount: 0,
+            deductionsBreakdown: {} as Record<string, number>
+          });
+
+          return (
+            <div className="fixed inset-0 bg-slate-950/65 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-white rounded-2xl shadow-xl max-w-2xl w-full overflow-hidden border border-slate-200 flex flex-col my-8"
+              >
+                <div className="p-5 bg-slate-900 text-white flex justify-between items-center no-print col-span-2">
+                  <div className="space-y-1">
+                    <span className="px-2.5 py-0.5 bg-orange-600 font-black rounded text-[9px] uppercase tracking-wider">TAX REPORTING DELEGATION</span>
+                    <h3 className="text-lg font-black" id="tax-pkg-title">연말정상/사업원천세 신고 위임장 및 증명패키지</h3>
+                  </div>
+                  <button
+                    onClick={() => setTaxDelegationEmpId(null)}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-350 hover:text-white rounded-lg transition-all cursor-pointer"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+
+                <div className="p-5 bg-slate-50 border-b border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-4 no-print text-xs">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">정산/신고 귀속년도</label>
+                    <select
+                      value={taxDelegationYear}
+                      onChange={(e) => setTaxDelegationYear(e.target.value)}
+                      className="w-full text-xs font-bold bg-white text-slate-800 p-2.5 border border-slate-200 rounded-xl cursor-pointer"
+                    >
+                      <option value="2026">2026 귀속</option>
+                      <option value="2025">2025 귀속</option>
+                      <option value="2024">2024 귀속</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">조교 주소지 (위임인)</label>
+                    <input
+                      type="text"
+                      value={taxDelegationAddress}
+                      onChange={(e) => setTaxDelegationAddress(e.target.value)}
+                      className="w-full text-xs font-bold bg-white text-slate-800 p-2.5 border border-slate-200 rounded-xl"
+                      placeholder="주소 입력"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">조교 연락처 (위임인)</label>
+                    <input
+                      type="text"
+                      value={taxDelegationPhone}
+                      onChange={(e) => setTaxDelegationPhone(e.target.value)}
+                      className="w-full text-xs font-bold bg-white text-slate-800 p-2.5 border border-slate-200 rounded-xl"
+                      placeholder="연락처 입력"
+                    />
+                  </div>
+                </div>
+
+                {/* Printable Document Area */}
+                <div className="p-8 overflow-y-auto bg-slate-100 flex-1 max-h-[60vh] text-slate-900" id="tax-print-area">
+                  <div className="bg-white p-8 max-w-xl mx-auto space-y-8 shadow-sm border border-slate-300 rounded-xl print:shadow-none print:border-none">
+                    <div className="text-center space-y-1">
+                      <h2 className="text-2xl font-serif font-black tracking-widest text-slate-950 underline">세무대리 신고 및 연말정산 위임장</h2>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Withholding Tax & Year-End Settlement Delegation</p>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-black text-slate-800 border-b pb-1">1. 위임인 (조교 소득자 법정대리사항)</h3>
+                      <table className="w-full border-collapse border border-slate-300 text-[11px]">
+                        <tbody>
+                          <tr>
+                            <td className="border border-slate-300 bg-slate-50 p-2 font-bold text-center w-24">성 명</td>
+                            <td className="border border-slate-300 p-2 font-semibold text-slate-800">{emp.name}</td>
+                            <td className="border border-slate-300 bg-slate-50 p-2 font-bold text-center w-24">직 급</td>
+                            <td className="border border-slate-300 p-2 font-semibold text-slate-800">{emp.position}</td>
+                          </tr>
+                          <tr>
+                            <td className="border border-slate-300 bg-slate-50 p-2 font-bold text-center">주민등록번호</td>
+                            <td className="border border-slate-300 p-2 font-semibold font-mono text-slate-800">{emp.ssn}</td>
+                            <td className="border border-slate-300 bg-slate-50 p-2 font-bold text-center">연 락 처</td>
+                            <td className="border border-slate-300 p-2 font-semibold font-mono text-slate-800">{taxDelegationPhone}</td>
+                          </tr>
+                          <tr>
+                            <td className="border border-slate-300 bg-slate-50 p-2 font-bold text-center">주 소</td>
+                            <td className="border border-slate-300 p-2 font-semibold text-slate-800" colSpan={3}>{taxDelegationAddress}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-black text-slate-800 border-b pb-1">2. 수임인 (학원 소득신고 대표권)</h3>
+                      <table className="w-full border-collapse border border-slate-300 text-[11px]">
+                        <tbody>
+                          <tr>
+                            <td className="border border-slate-300 bg-slate-50 p-2 font-bold text-center w-24">상 호 / 법 인</td>
+                            <td className="border border-slate-300 p-2 font-semibold text-slate-800">동명 가맹 학원 주식회사</td>
+                            <td className="border border-slate-300 bg-slate-50 p-2 font-bold text-center w-24">대표자 지부장</td>
+                            <td className="border border-slate-300 p-2 font-semibold text-slate-800">정 현 철 (인)</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="space-y-2.5 text-[11px] leading-relaxed text-slate-650">
+                      <h3 className="text-xs font-black text-slate-800 border-b pb-1">3. 위임 내용 및 위헌보장 확약</h3>
+                      <p>
+                        위임인은 귀속년도 <strong className="text-slate-900 font-extrabold">{taxDelegationYear}년</strong> 소득세 연말정산 신고, 종합소득세 선납 정산, 원천징수 대상 사업소득세(3.3%) 신고, 4대 사회보험 급여 자료 공제액의 세무대리 및 피고용 신고 권한 일체를 상기 수임인(학원 대표 및 위탁 지무장)에게 전적으로 위임합니다.
+                      </p>
+                      <p>
+                        수임인은 위임인을 조력하여 해당 귀속년도 중 당해 학원에서 집계된 다음의 연간 누적 총 노동시간 및 지급 실적 대장을 준용하여 성실하고 투명하게 공제 세액을 국세청 홈택스에 전자 신고할 것임을 확약합니다.
+                      </p>
+                    </div>
+
+                    <div className="space-y-3 page-break-before">
+                      <div className="flex justify-between items-center border-b pb-1">
+                        <h3 className="text-xs font-black text-slate-800">4. 당해 기관 지급 및 원천공제 세무 요약장 (귀속기간 내 집계)</h3>
+                        <span className="text-[9px] text-slate-400 font-extrabold font-mono">신고대상 월수: {annualSummary.monthsCount}개월</span>
+                      </div>
+                      
+                      <table className="w-full border-collapse border border-slate-300 text-[10px]">
+                        <thead>
+                          <tr className="bg-slate-50">
+                            <th className="border border-slate-300 p-1.5 font-bold text-center">누적총시간</th>
+                            <th className="border border-slate-300 p-1.5 font-bold text-center">세전총급여</th>
+                            <th className="border border-slate-300 p-1.5 font-bold text-center">공제 합계액</th>
+                            <th className="border border-slate-300 p-1.5 font-bold text-center">실수령 누적액</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr className="font-mono text-center font-bold text-slate-900">
+                            <td className="border border-slate-300 p-2">{annualSummary.hours.toFixed(1)}시간</td>
+                            <td className="border border-slate-300 p-2 text-blue-700">{formatCurrency(annualSummary.totalGross)}</td>
+                            <td className="border border-slate-300 p-2 text-red-600">-{formatCurrency(annualSummary.totalDeduction)}</td>
+                            <td className="border border-slate-300 p-2 text-emerald-700">{formatCurrency(annualSummary.netSalary)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+
+                      {Object.keys(annualSummary.deductionsBreakdown).length > 0 && (
+                        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] space-y-1 font-mono">
+                          <span className="font-bold text-slate-500 block text-[9px] mb-1">상세 공제 항목 합산 일람 (세무 신고 대조용)</span>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                            {Object.entries(annualSummary.deductionsBreakdown).map(([key, value]) => (
+                              <div key={key} className="flex justify-between border-b pb-0.5 border-slate-150">
+                                <span className="text-slate-400">{key}</span>
+                                <span className="font-bold text-red-650">{formatCurrency(value)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-3 pt-4 text-[10.5px] leading-relaxed text-slate-500">
+                      <p>
+                        본 위임장에 기재된 총 노동시간 통계 및 지급 내역은 피사용자인 위임인 본인의 동의하에 시스템에서 엄격히 보정 및 인출된 공식 소득 자료 연간 합산액임이 보장되며, 위임인 및 수임인은 상호 투명한 세무합의에 따라 본 서류를 날인하여 세무대리 신고 시 제출하는 바입니다.
+                      </p>
+                    </div>
+
+                    <div className="text-right text-[11px] pr-6 pt-4 font-bold text-slate-800">
+                      제 출 자 (위임조교): &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; (서명 또는 인)
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 border-t border-slate-150 flex justify-end gap-3.5 no-print">
+                  <button
+                    onClick={() => setTaxDelegationEmpId(null)}
+                    className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                  >
+                    닫기
+                  </button>
+                  <button
+                    onClick={() => window.print()}
+                    className="px-5 py-2 bg-orange-600 hover:bg-orange-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Printer size={13} />
+                    위임 세무신고 패키지 인쇄 출력
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
     </div>
   );
 }

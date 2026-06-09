@@ -13,6 +13,8 @@ interface WageStatementSheetProps {
     weeklyHours: number;
     baseSalary: number;
     holidayAllowance: number;
+    overtimeAllowance?: number;
+    nightAllowance?: number;
     allowancesAmount: number;
     itemizedAllowances: EmployeeAllowances;
     totalGross: number;
@@ -38,6 +40,8 @@ interface WageStatementSheetProps {
       weeklyHours: number;
       baseSalary: number;
       holidayAllowance: number;
+      overtimeAllowance?: number;
+      nightAllowance?: number;
       allowancesAmount: number;
       itemizedAllowances: EmployeeAllowances;
       totalGross: number;
@@ -413,22 +417,22 @@ export default function WageStatementSheet({
                         <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center">연장근로수당</td>
                         <td className="border border-slate-400 text-left px-3">
                           {calc.overtimeHours > 0 
-                            ? `연장근로 ${calc.overtimeHours.toFixed(1)}시간 × 시급 ${emp.hourlyWage.toLocaleString()}원 × 1.5`
+                            ? `연장근로 ${calc.overtimeHours.toFixed(1)}시간 × 시급 ${emp.hourlyWage.toLocaleString()}원 × 0.5 가산`
                             : '연장 근로 8시간 초과 누적분 없음'}
                         </td>
                         <td className="border border-slate-400 text-right px-3 font-mono font-bold">
-                          {Math.round(calc.overtimeHours * emp.hourlyWage * 1.5).toLocaleString()}
+                          {Math.round(calc.overtimeAllowance || 0).toLocaleString()}
                         </td>
                       </tr>
                       <tr>
                         <td className="border border-slate-400 font-bold bg-slate-50 px-2.5 py-1 text-center">야간근로수당</td>
                         <td className="border border-slate-400 text-left px-3">
                           {calc.nightHours > 0 
-                            ? `야간근로(22:00 ~ 06:00) ${calc.nightHours.toFixed(1)}시간 × 시급 ${emp.hourlyWage.toLocaleString()}원 × 0.5`
+                            ? `야간근로(22:00 ~ 06:00) ${calc.nightHours.toFixed(1)}시간 × 시급 ${emp.hourlyWage.toLocaleString()}원 × 0.5 가산`
                             : '야간근무(22시~익일06시) 집계분 없음'}
                         </td>
                         <td className="border border-slate-400 text-right px-3 font-mono font-bold">
-                          {Math.round(calc.nightHours * emp.hourlyWage * 0.5).toLocaleString()}
+                          {Math.round(calc.nightAllowance || 0).toLocaleString()}
                         </td>
                       </tr>
                       <tr>

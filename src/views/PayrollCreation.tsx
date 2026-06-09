@@ -14,7 +14,8 @@ import {
   Building2,
   Settings,
   Plus,
-  Coins
+  Coins,
+  FileSpreadsheet
 } from 'lucide-react';
 import { Employee, AttendanceRecord, PayrollStep, PayrollReport, EmployeeAllowances } from '../types';
 import { TAX_RATES_2026 } from '../constants';
@@ -37,6 +38,9 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
   const [attendance, setAttendance] = useState<AttendanceRecord[]>(editReport ? editReport.attendance : []);
   const [selectedWeek, setSelectedWeek] = useState(new Date());
   const [weeklyHolidayStatus, setWeeklyHolidayStatus] = useState<Record<string, any>>(editReport ? editReport.weeklyHolidayStatus : {}); 
+  const [nightWorkStatus, setNightWorkStatus] = useState<Record<string, any>>(editReport && editReport.nightWorkStatus ? editReport.nightWorkStatus : {});
+  const [proRataDays, setProRataDays] = useState<Record<string, Record<string, number>>>(editReport && editReport.proRataDays ? editReport.proRataDays : {});
+  const [graceMinutes, setGraceMinutes] = useState<number>(editReport && editReport.graceMinutes !== undefined ? editReport.graceMinutes : 3);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [employeeTaxOverrides, setEmployeeTaxOverrides] = useState<Record<string, { taxType: 'FREELANCER' | 'FOUR_MAJOR' | 'CUSTOM', customTaxRate: number }>>({});
@@ -184,9 +188,37 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
     return { start: '09:00', end: '18:00' };
   };
 
-  const calculateHours = (record: AttendanceRecord) => {
+  const getGraceAdjustedTimes = (record: AttendanceRecord) => {
     let startStr = record.clockIn;
     let endStr = record.clockOut;
+
+    if (graceMinutes > 0 && startStr && endStr && !record.isPaidLeave) {
+      const emp = employees.find(e => e.id === record.employeeId);
+      if (emp) {
+        const std = getStandardHoursForRecord(emp, record);
+        if (std && std.start && std.end) {
+          try {
+            const actStart = parse(startStr, 'HH:mm', new Date());
+            const stdStart = parse(std.start, 'HH:mm', new Date());
+            if (Math.abs(differenceInMinutes(actStart, stdStart)) <= graceMinutes) {
+              startStr = std.start;
+            }
+          } catch (e) { /* ignore */ }
+          try {
+            const actEnd = parse(endStr, 'HH:mm', new Date());
+            const stdEnd = parse(std.end, 'HH:mm', new Date());
+            if (Math.abs(differenceInMinutes(actEnd, stdEnd)) <= graceMinutes) {
+              endStr = std.end;
+            }
+          } catch (e) { /* ignore */ }
+        }
+      }
+    }
+    return { clockIn: startStr, clockOut: endStr };
+  };
+
+  const calculateHours = (record: AttendanceRecord) => {
+    let { clockIn: startStr, clockOut: endStr } = getGraceAdjustedTimes(record);
 
     if (record.isPaidLeave) {
       const emp = employees.find(e => e.id === record.employeeId);
@@ -395,6 +427,50 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
           </div>
         </div>
 
+        {/* 출퇴근 정방 시간(Grace Period) 보정 설정 */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-150 space-y-4">
+          <div className="flex flex-wrap justify-between items-center gap-4">
+            <div className="space-y-1">
+              <span className="flex items-center gap-1.5 font-bold text-xs text-slate-700 block uppercase tracking-tight">
+                <Clock size={15} className="text-blue-600" />
+                출퇴근 정방 시간 (Grace Period) 보정 설정
+              </span>
+              <span className="text-[12px] text-slate-500 block">
+                조교의 출퇴근 시간이 소정근로 scheduled 시간과 설정된 범위(분) 내일 경우, 온타임 정시 정각 근로로 보정 처리해 급여를 정밀 계산합니다.
+              </span>
+            </div>
+            {/* Range Toggles */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+              {[0, 1, 2, 3, 5, 10].map((mins) => (
+                <button
+                  key={mins}
+                  onClick={() => setGraceMinutes(mins)}
+                  className={cn(
+                    "px-3 py-1.5 text-xs font-black rounded-lg transition-all shadow-sm cursor-pointer",
+                    graceMinutes === mins
+                      ? "bg-blue-600 text-white font-extrabold shadow-sm"
+                      : "bg-white text-slate-650 hover:bg-slate-50 hover:text-slate-900 border border-slate-200/50"
+                  )}
+                >
+                  {mins === 0 ? "보정 없음" : `${mins}분`}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-xl flex items-center gap-2.5 text-[11px] text-blue-900 leading-relaxed">
+            <AlertCircle size={15} className="text-blue-600 flex-shrink-0" />
+            <span>
+              {graceMinutes === 0 ? (
+                <span><strong>보정 비활성화:</strong> 조교가 태그한 출퇴근 시간이 분당 그대로 소수점 계산에 산입됩니다.</span>
+              ) : (
+                <span>
+                  <strong>정방 시간 {graceMinutes}분 보정 적용 중:</strong> 실시간 출퇴근 기록이 매칭되는 요일별 소정 교대 시작/종료 시각의 <strong>앞뒤 {graceMinutes}분 범위</strong> 내에 들어오는 경우(예: 13:00 출근 시 12:57~13:03 사이 출근), 자동으로 정시 출근 또는 정시 퇴근으로 정칙화하여 일관성 있는 시급을 보상하게 됩니다.
+                </span>
+              )}
+            </span>
+          </div>
+        </div>
+
         <div className="space-y-8">
           {employees.map(emp => {
             const empRecords = attendance.filter(r => r.employeeId === emp.id);
@@ -407,7 +483,12 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
               const currentSetting = weeklyHolidayStatus[emp.id]?.[week.key] || 'AUTO';
               const isPaid = currentSetting === 'YES' || (currentSetting === 'AUTO' && isAutoEligible);
               if (isPaid) {
-                estHolidayAllowance += calculateWeeklyHolidayAllowance(wHours, emp.hourlyWage);
+                let wAllowance = calculateWeeklyHolidayAllowance(wHours, emp.hourlyWage);
+                const ratioDays = proRataDays[emp.id]?.[week.key] ?? 7;
+                if (ratioDays < 7) {
+                  wAllowance = Math.round(wAllowance * ratioDays / 7);
+                }
+                estHolidayAllowance += wAllowance;
               }
               totalHoursWorked += wHours;
             });
@@ -495,7 +576,11 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                       const currentSetting = weeklyHolidayStatus[emp.id]?.[week.key] || 'AUTO';
                       
                       const isPaid = currentSetting === 'YES' || (currentSetting === 'AUTO' && isAutoEligible);
-                      const wAllowance = isPaid ? calculateWeeklyHolidayAllowance(wHours, emp.hourlyWage) : 0;
+                      let wAllowance = isPaid ? calculateWeeklyHolidayAllowance(wHours, emp.hourlyWage) : 0;
+                      const ratioDays = proRataDays[emp.id]?.[week.key] ?? 7;
+                      if (ratioDays < 7) {
+                        wAllowance = Math.round(wAllowance * ratioDays / 7);
+                      }
 
                       return (
                         <div key={week.key} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col justify-between space-y-3">
@@ -511,6 +596,44 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                               {isPaid ? `지급 (${formatCurrency(wAllowance)})` : "미지급"}
                             </span>
                           </div>
+
+                          {/* Pro-rata Setting Stepper */}
+                          {isPaid && (
+                            <div className="p-1.5 bg-white border border-slate-150 rounded-lg flex items-center justify-between text-[10px]">
+                              <span className="text-slate-500 font-bold">재직 일수(정상7)</span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const curr = proRataDays[emp.id]?.[week.key] ?? 7;
+                                    const next = Math.max(1, curr - 1);
+                                    setProRataDays(prev => ({
+                                      ...prev,
+                                      [emp.id]: { ...(prev[emp.id] || {}), [week.key]: next }
+                                    }));
+                                  }}
+                                  className="w-4.5 h-4.5 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-black text-slate-600 cursor-pointer"
+                                >
+                                  -
+                                </button>
+                                <span className="font-mono font-black text-slate-800 w-5 text-center">{ratioDays}일</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const curr = proRataDays[emp.id]?.[week.key] ?? 7;
+                                    const next = Math.min(7, curr + 1);
+                                    setProRataDays(prev => ({
+                                      ...prev,
+                                      [emp.id]: { ...(prev[emp.id] || {}), [week.key]: next }
+                                    }));
+                                  }}
+                                  className="w-4.5 h-4.5 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-black text-slate-600 cursor-pointer"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          )}
 
                           <div className="grid grid-cols-3 gap-0.5 bg-slate-200 p-0.5 rounded-lg border border-slate-300">
                             <button
@@ -551,6 +674,150 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                               className={cn(
                                 "py-1 text-[9px] font-black rounded-md transition-all text-center",
                                 currentSetting === 'NO' ? "bg-red-650 text-white shadow-sm" : "text-slate-500 hover:text-red-650"
+                              )}
+                            >
+                              미지급 N
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Week-by-week Night/Overtime Allowance Controls */}
+                <div className="p-6 bg-slate-50/50 border-b border-slate-150 space-y-4 border-t border-slate-150/80">
+                  <div className="flex flex-wrap justify-between items-center gap-3">
+                    <div>
+                      <span className="font-bold text-xs text-slate-700 block uppercase tracking-tight">주차별 연장·야간수당(야근근무) 가산 지급 설정</span>
+                      <span className="text-[11px] text-slate-500">조교의 시간외 연장 근무(8시간 초과) 및 야간 야근(22시~06시)에 대한 0.5배 가산수당 지급 여부를 조정하세요.</span>
+                    </div>
+                    
+                    {/* Bulk Action Pills */}
+                    <div className="flex gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+                      <button
+                        onClick={() => {
+                          const updated: Record<string, string> = {};
+                          weeks.forEach(w => { updated[w.key] = 'YES'; });
+                          setNightWorkStatus(prev => ({ ...prev, [emp.id]: updated }));
+                        }}
+                        className="px-3 py-1 bg-white hover:bg-blue-50 text-blue-600 border border-slate-200 text-[10px] font-black rounded-lg transition-all shadow-sm cursor-pointer"
+                      >
+                        야근가산 일괄 지급(Y)
+                      </button>
+                      <button
+                        onClick={() => {
+                          const updated: Record<string, string> = {};
+                          weeks.forEach(w => { updated[w.key] = 'NO'; });
+                          setNightWorkStatus(prev => ({ ...prev, [emp.id]: updated }));
+                        }}
+                        className="px-3 py-1 bg-white hover:bg-red-50 text-red-650 border border-slate-200 text-[10px] font-black rounded-lg transition-all shadow-sm cursor-pointer"
+                      >
+                        야근가산 일괄 미지급(N)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setNightWorkStatus(prev => {
+                            const copy = { ...prev };
+                            delete copy[emp.id];
+                            return copy;
+                          });
+                        }}
+                        className="px-3 py-1 bg-white hover:bg-slate-50 text-slate-500 border border-slate-200 text-[10px] font-black rounded-lg transition-all shadow-sm cursor-pointer"
+                      >
+                        자동 계산 적용
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 bg-white p-4 rounded-xl border border-slate-150">
+                    {weeks.map(week => {
+                      let wOvertime = 0;
+                      let wNight = 0;
+                      
+                      const weekRecords = attendance.filter(r => r.employeeId === emp.id);
+                      weekRecords.forEach(record => {
+                        try {
+                          const rd = parse(record.date, 'yyyy-MM-dd', new Date());
+                          const rStart = format(startOfWeek(rd, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+                          if (rStart === week.key && !record.isAbsence && (record.clockIn && record.clockOut || record.isPaidLeave)) {
+                            const dailyHours = calculateHours(record);
+                            if (!record.isPaidLeave) {
+                              if (dailyHours > 8) {
+                                wOvertime += (dailyHours - 8);
+                              }
+                              const adjusted = getGraceAdjustedTimes(record);
+                              if (adjusted.clockIn && adjusted.clockOut) {
+                                wNight += calculateNightHours(adjusted.clockIn, adjusted.clockOut);
+                              }
+                            }
+                          }
+                        } catch (e) {
+                          // ignore
+                        }
+                      });
+
+                      const currentNightSetting = nightWorkStatus[emp.id]?.[week.key] || 'AUTO';
+                      const isNightPremiumPaid = currentNightSetting === 'YES' || currentNightSetting === 'AUTO';
+                      
+                      const computedPremium = isNightPremiumPaid ? Math.round((wOvertime * emp.hourlyWage * 0.5) + (wNight * emp.hourlyWage * 0.5)) : 0;
+
+                      return (
+                        <div key={week.key} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col justify-between space-y-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <span className="text-[11px] font-black text-slate-600 block">{week.label} 주차 야간·연장</span>
+                              <span className="font-mono text-[10px] text-slate-400 block mt-0.5 leading-none font-semibold">
+                                연장 {wOvertime.toFixed(1)}h / 야간 {wNight.toFixed(1)}h
+                              </span>
+                            </div>
+                            <span className={cn(
+                              "px-2 py-0.5 rounded-full text-[9px] font-black tracking-tight border",
+                              isNightPremiumPaid && computedPremium > 0 ? "bg-violet-50 text-violet-600 border-violet-100" : "bg-slate-100 text-slate-400 border-slate-200"
+                            )}>
+                              {isNightPremiumPaid && computedPremium > 0 ? `가산 (+${formatCurrency(computedPremium)})` : "가산 없음"}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-0.5 bg-slate-200 p-0.5 rounded-lg border border-slate-300">
+                            <button
+                              onClick={() => {
+                                setNightWorkStatus(prev => ({
+                                  ...prev,
+                                  [emp.id]: { ...(prev[emp.id] || {}), [week.key]: 'AUTO' }
+                                }));
+                              }}
+                              className={cn(
+                                "py-1 text-[9px] font-black rounded-md transition-all text-center cursor-pointer",
+                                currentNightSetting === 'AUTO' ? "bg-white text-slate-800 shadow-sm border border-slate-200/50" : "text-slate-500 hover:text-slate-800"
+                              )}
+                            >
+                              자동 Y
+                            </button>
+                            <button
+                              onClick={() => {
+                                setNightWorkStatus(prev => ({
+                                  ...prev,
+                                  [emp.id]: { ...(prev[emp.id] || {}), [week.key]: 'YES' }
+                                }));
+                              }}
+                              className={cn(
+                                "py-1 text-[9px] font-black rounded-md transition-all text-center cursor-pointer",
+                                currentNightSetting === 'YES' ? "bg-violet-600 text-white shadow-sm" : "text-slate-500 hover:text-violet-650"
+                              )}
+                            >
+                              지급 Y
+                            </button>
+                            <button
+                              onClick={() => {
+                                setNightWorkStatus(prev => ({
+                                  ...prev,
+                                  [emp.id]: { ...(prev[emp.id] || {}), [week.key]: 'NO' }
+                                }));
+                              }}
+                              className={cn(
+                                "py-1 text-[9px] font-black rounded-md transition-all text-center cursor-pointer",
+                                currentNightSetting === 'NO' ? "bg-red-650 text-white shadow-sm" : "text-slate-500 hover:text-red-650"
                               )}
                             >
                               미지급 N
@@ -728,7 +995,12 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
       
       const isPaid = currentSetting === 'YES' || (currentSetting === 'AUTO' && isAutoEligible);
       if (isPaid) {
-        holidayAllowance += calculateWeeklyHolidayAllowance(wHours, emp.hourlyWage);
+        let weeklyAllowance = calculateWeeklyHolidayAllowance(wHours, emp.hourlyWage);
+        const ratioDays = proRataDays[emp.id]?.[week.key] ?? 7;
+        if (ratioDays < 7) {
+          weeklyAllowance = Math.round(weeklyAllowance * ratioDays / 7);
+        }
+        holidayAllowance += weeklyAllowance;
       }
     });
 
@@ -742,6 +1014,9 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
     let nightHours = 0;
     let holidayHours = 0;
 
+    let overtimeAllowance = 0;
+    let nightAllowance = 0;
+
     personRecords.forEach(record => {
       let dailyHours = 0;
       if (!record.isAbsence && (record.clockIn && record.clockOut || record.isPaidLeave)) {
@@ -751,15 +1026,39 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
         } else {
           actualMinutes += dailyHours * 60;
 
+          // Compute week key for the day
+          let recordWeekKey = '';
+          try {
+            const rd = parse(record.date, 'yyyy-MM-dd', new Date());
+            const rStart = startOfWeek(rd, { weekStartsOn: 1 });
+            recordWeekKey = format(rStart, 'yyyy-MM-dd');
+          } catch (e) {
+            // ignore
+          }
+
+          const nightWorkSetting = nightWorkStatus[emp.id]?.[recordWeekKey] || 'AUTO';
+          // AUTO and YES will compute overtime/night premium. NO will skip.
+          const isNightPremiumPaid = nightWorkSetting === 'YES' || nightWorkSetting === 'AUTO';
+
           // Overtime calculation
+          let dailyOvertime = 0;
           if (dailyHours > 8) {
-            overtimeHours += (dailyHours - 8);
+            dailyOvertime = (dailyHours - 8);
+            overtimeHours += dailyOvertime;
           }
 
           // Night hours
-          if (record.clockIn && record.clockOut) {
-            const nHours = calculateNightHours(record.clockIn, record.clockOut);
+          let dailyNight = 0;
+          const adjusted = getGraceAdjustedTimes(record);
+          if (adjusted.clockIn && adjusted.clockOut) {
+            const nHours = calculateNightHours(adjusted.clockIn, adjusted.clockOut);
+            dailyNight = nHours;
             nightHours += nHours;
+          }
+
+          if (isNightPremiumPaid) {
+            overtimeAllowance += Math.round(dailyOvertime * emp.hourlyWage * 0.5);
+            nightAllowance += Math.round(dailyNight * emp.hourlyWage * 0.5);
           }
 
           // Holiday / weekend work count
@@ -810,8 +1109,8 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
 
     const totalAllowances = posAllowance + qualAllowance + bizAllowance + cashAllowance + mealAllowance + otherAllowance + omittedAllowance;
     
-    // Add custom premium/annual leave allowance to gross!
-    const totalGross = baseSalary + holidayAllowance + totalAllowances + holidayWorkPremiumAllowance + paidLeaveAllowance;
+    // Add custom premium/annual leave allowance to gross! Include overtimeAllowance and nightAllowance
+    const totalGross = baseSalary + holidayAllowance + overtimeAllowance + nightAllowance + totalAllowances + holidayWorkPremiumAllowance + paidLeaveAllowance;
 
     // Standard non-taxable meal limit is 200,000 KRW
     const nonTaxableAmount = Math.min(200000, mealAllowance);
@@ -866,6 +1165,8 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
       weeklyHours,
       baseSalary,
       holidayAllowance,
+      overtimeAllowance,
+      nightAllowance,
       allowancesAmount: totalAllowances + holidayWorkPremiumAllowance + paidLeaveAllowance,
       itemizedAllowances: allowanceOverride,
       holidayWorkPremiumAllowance,
@@ -884,6 +1185,100 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
     };
   };
 
+  const handleExportExcel = () => {
+    const reportCalculations = employees.map(emp => {
+      return computeEmployeePayroll(emp);
+    });
+
+    const headers = [
+      "조교명", "직급", "근무시간(h)", "기본수당(원)", "주휴수당(원)", 
+      "연장가산수당(원)", "야간가산수당(원)",
+      "직책수당(원)", "자격수당(원)", "업무추진비(원)", "출납수당(원)", 
+      "식대(비과세)(원)", "기타수당(원)", "수기누락금(원)", "세전 총수령액(원)", 
+      "정산 세무방식", "원천세율/보험료공제(%)", "국민연금(원)", "건강보험(원)", 
+      "장기요양(원)", "고용보험(원)", "공제 합계액(원)", "실수령액(원)"
+    ].join(",");
+
+    const csvRows = [headers];
+
+    reportCalculations.forEach((item: any) => {
+      const name = item.name || "";
+      const pos = item.position || "";
+      const hours = item.weeklyHours || 0;
+      const baseSalary = item.baseSalary || 0;
+      const holidayAllowance = item.holidayAllowance || 0;
+      const overtimeAllow = item.overtimeAllowance || 0;
+      const nightAllow = item.nightAllowance || 0;
+      
+      const itemized = item.itemizedAllowances || {};
+      const posAllowance = itemized.position || 0;
+      const qualAllowance = itemized.qualification || 0;
+      const bizAllowance = itemized.businessPromotion || 0;
+      const cashAllowance = itemized.cashier || 0;
+      const mealAllowance = itemized.meal || 0;
+      const otherAllowance = itemized.other || 0;
+      const omitted = itemized.omitted || 0;
+      
+      const gross = item.totalGross || 0;
+      
+      let taxTypeStr = "3.3% 프리랜서";
+      let taxRateStr = "3.3%";
+      if (item.taxType === "FOUR_MAJOR") {
+        taxTypeStr = "4대보험 공제";
+        taxRateStr = "실시간 사회보험요율";
+      } else if (item.taxType === "CUSTOM") {
+        taxTypeStr = "커스텀";
+        taxRateStr = `${item.customTaxRate || 0}%`;
+      }
+
+      const np = item.deductions?.['국민연금 (4.5%)'] || 0;
+      const hi = item.deductions?.['건강보험 (3.545%)'] || 0;
+      const ltc = item.deductions?.['장기요양보험'] || 0;
+      const ei = item.deductions?.['고용보험 (0.9%)'] || 0;
+      
+      const totalDeduction = item.totalDeduction || 0;
+      const netSalary = item.netSalary || 0;
+
+      const row = [
+        `"${name}"`,
+        `"${pos}"`,
+        hours.toFixed(1),
+        baseSalary,
+        holidayAllowance,
+        overtimeAllow,
+        nightAllow,
+        posAllowance,
+        qualAllowance,
+        bizAllowance,
+        cashAllowance,
+        mealAllowance,
+        otherAllowance,
+        omitted,
+        gross,
+        `"${taxTypeStr}"`,
+        `"${taxRateStr}"`,
+        np,
+        hi,
+        ltc,
+        ei,
+        totalDeduction,
+        netSalary
+      ];
+
+      csvRows.push(row.join(","));
+    });
+
+    const csvContent = "\uFEFF" + csvRows.join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `급여정산대장_엑셀명세_${academyName || '학원'}_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleSaveAndExit = (shouldDownloadJSON: boolean) => {
     const reportCalculations = employees.map(emp => {
       return computeEmployeePayroll(emp);
@@ -896,6 +1291,9 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
       employees,
       attendance,
       weeklyHolidayStatus,
+      nightWorkStatus,
+      proRataDays,
+      graceMinutes,
       calculated: reportCalculations
     };
 
@@ -922,13 +1320,20 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
             <h2 className="text-2xl font-bold text-slate-900">세금 및 최종 급여 확인</h2>
             <p className="text-slate-500">지급 수치와 요율 및 공제 방식(3.3%, 4대보험, 커스텀)을 리뷰한 다음 지급 자격 검사를 마무리 하세요.</p>
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-2.5">
             <button onClick={() => setStep(3)} className="px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-bold border border-slate-200 rounded-xl transition-all h-11 flex items-center">이전</button>
-            <button onClick={() => handleSaveAndExit(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition-all h-11 flex items-center gap-2">
+            <button
+              onClick={handleExportExcel}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all h-11 flex items-center gap-1.5 shadow-sm shadow-emerald-100 cursor-pointer text-xs"
+            >
+              <FileSpreadsheet size={15} />
+              엑셀(.csv) 내보내기
+            </button>
+            <button onClick={() => handleSaveAndExit(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded-xl transition-all h-11 flex items-center gap-2 text-xs">
               <CheckCircle2 size={16} />
               저장 및 완료
             </button>
-            <button onClick={() => handleSaveAndExit(true)} className="btn-3d px-6 py-2 h-11 flex items-center gap-2">
+            <button onClick={() => handleSaveAndExit(true)} className="btn-3d px-6 py-2 h-11 flex items-center gap-2 text-xs">
               <Download size={16} />
               급여대장 패키지(.json) 내보내기 & 완료
             </button>
@@ -1050,6 +1455,18 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                         <span className="text-slate-500">주휴수당</span>
                         <span className="font-extrabold text-blue-600">+{formatCurrency(payroll.holidayAllowance)}</span>
                       </div>
+                      {payroll.overtimeAllowance !== undefined && payroll.overtimeAllowance > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">연장근로수당 ({payroll.overtimeHours.toFixed(1)}h)</span>
+                          <span className="font-extrabold text-violet-600">+{formatCurrency(payroll.overtimeAllowance)}</span>
+                        </div>
+                      )}
+                      {payroll.nightAllowance !== undefined && payroll.nightAllowance > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">야간근로수당 ({payroll.nightHours.toFixed(1)}h)</span>
+                          <span className="font-extrabold text-violet-600">+{formatCurrency(payroll.nightAllowance)}</span>
+                        </div>
+                      )}
                       
                       {/* Allowances list */}
                       {payroll.allowancesAmount > 0 && (

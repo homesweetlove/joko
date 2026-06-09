@@ -52,6 +52,10 @@ export default function App() {
     setEmployees(prev => [...prev, emp]);
   };
 
+  const updateEmployee = (updated: Employee) => {
+    setEmployees(prev => prev.map(e => e.id === updated.id ? updated : e));
+  };
+
   const deleteEmployee = (id: string) => {
     setEmployees(prev => prev.filter(e => e.id !== id));
   };
@@ -90,6 +94,7 @@ export default function App() {
         <EmployeeManagement 
           employees={employees}
           onAddEmployee={addEmployee}
+          onUpdateEmployee={updateEmployee}
           onDeleteEmployee={deleteEmployee}
           onBack={() => setCurrentView('MAIN')}
           onImportEmployees={handleImportEmployees}

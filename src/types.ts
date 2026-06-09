@@ -20,6 +20,8 @@ export interface Employee {
   hireDate: string;
   resignationDate?: string;
   payday: number; // 1-31
+  bankName?: string; // 은행명
+  bankAccount?: string; // 계좌번호
   standardWorkHours: {
     [key in '월' | '화' | '수' | '목' | '금']?: {
       start: string; // "HH:mm"
@@ -29,6 +31,8 @@ export interface Employee {
   taxType: 'FREELANCER' | 'FOUR_MAJOR' | 'CUSTOM';
   customTaxRate?: number; // % rate for CUSTOM tax
   allowances?: EmployeeAllowances;
+  resignationNoticeDate?: string; // 사직 의사 등록일
+  resignationTargetDate?: string; // 사직/만료 예정일
 }
 
 export interface AttendanceRecord {
@@ -49,7 +53,10 @@ export interface PayrollReport {
   academyName: string;
   employees: Employee[];
   attendance: AttendanceRecord[];
-  weeklyHolidayStatus: Record<string, Record<number, boolean>>;
+  weeklyHolidayStatus: Record<string, any>;
+  nightWorkStatus?: Record<string, any>;
+  proRataDays?: Record<string, Record<string, number>>;
+  graceMinutes?: number;
   calculated: {
     employeeId: string;
     name: string;
@@ -57,6 +64,8 @@ export interface PayrollReport {
     weeklyHours: number;
     baseSalary: number;
     holidayAllowance: number;
+    overtimeAllowance?: number; // 연장근로수당
+    nightAllowance?: number;    // 야간근로수당
     allowancesAmount: number; // total allowances
     itemizedAllowances: EmployeeAllowances;
     totalGross: number;
