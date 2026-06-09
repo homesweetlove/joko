@@ -795,7 +795,9 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                       {activeReport ? (() => {
                         const list = activeReport.calculated.filter((calc) => {
                           const nameMatch = calc.name.toLowerCase().includes(auditSearchQuery.toLowerCase());
-                          const taxMatch = auditTaxFilter === 'all' || calc.taxType === auditTaxFilter;
+                          const taxMatch = auditTaxFilter === 'all' || 
+                            (auditTaxFilter === 'FREELANCER' && (calc.taxType === 'FREELANCER' || calc.taxType === 'CUSTOM')) ||
+                            (auditTaxFilter === 'FOUR_MAJOR' && calc.taxType === 'FOUR_MAJOR');
                           return nameMatch && taxMatch;
                         });
 
@@ -807,29 +809,42 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                           );
                         }
 
-                        return list.map((calc) => (
-                          <button
-                            key={calc.employeeId}
-                            onClick={() => setActiveAuditEmployeeId(calc.employeeId)}
-                            className={cn(
-                              "w-full text-left p-3 rounded-xl border transition-all flex justify-between items-center",
-                              activeAuditEmployeeId === calc.employeeId
-                                ? "bg-slate-50 border-slate-900 shadow-sm translate-x-1"
-                                : "bg-white border-slate-100 hover:bg-slate-50/50"
-                            )}
-                          >
-                            <div className="space-y-1">
-                              <div className="font-extrabold text-slate-900 text-sm leading-tight">{calc.name}</div>
-                              <div className="text-xs text-slate-500">{calc.position}</div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-black inline-block mb-1 tracking-tight">
-                                {calc.taxType === 'FREELANCER' ? '3.3%' : '4대보험'}
+                        return list.map((calc) => {
+                          let taxBadgeLabel = '4대보험';
+                          if (calc.taxType === 'FREELANCER') {
+                            taxBadgeLabel = '3.3% 프리';
+                          } else if (calc.taxType === 'CUSTOM') {
+                            taxBadgeLabel = `커스텀 (${calc.customTaxRate || 0}%)`;
+                          }
+
+                          return (
+                            <button
+                              key={calc.employeeId}
+                              onClick={() => setActiveAuditEmployeeId(calc.employeeId)}
+                              className={cn(
+                                "w-full text-left p-3 rounded-xl border transition-all flex justify-between items-center",
+                                activeAuditEmployeeId === calc.employeeId
+                                  ? "bg-slate-50 border-slate-900 shadow-sm translate-x-1"
+                                  : "bg-white border-slate-100 hover:bg-slate-50/50"
+                              )}
+                            >
+                              <div className="space-y-1">
+                                <div className="font-extrabold text-slate-900 text-sm leading-tight">{calc.name}</div>
+                                <div className="text-xs text-slate-500">{calc.position}</div>
                               </div>
-                              <div className="font-black text-xs text-slate-800">{formatCurrency(calc.netSalary)}</div>
-                            </div>
-                          </button>
-                        ));
+                              <div className="text-right">
+                                <div className={cn(
+                                  "text-[9px] px-1.5 py-0.5 rounded font-black inline-block mb-1 tracking-tight",
+                                  calc.taxType === 'FREELANCER' ? "bg-blue-50 text-blue-600" :
+                                  calc.taxType === 'FOUR_MAJOR' ? "bg-purple-50 text-purple-600" : "bg-amber-50 text-amber-600"
+                                )}>
+                                  {taxBadgeLabel}
+                                </div>
+                                <div className="font-black text-xs text-slate-800">{formatCurrency(calc.netSalary)}</div>
+                              </div>
+                            </button>
+                          );
+                        });
                       })() : (
                         <div className="text-center py-10 text-slate-400 text-xs font-semibold">
                           학원을 선택해주시면 조교 목록이 표시됩니다.
@@ -897,12 +912,12 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                               const dayMapping = [1, 2, 3, 4, 5, 6, 0]; // Monday to Sunday
 
                               // Build overlaps count
-                              const overlapGrid: Record<number, Record<number, number>> = {};
+                              const overlapGrid: Record<number, Record<number, Set<string>>> = {};
                               
                               dayMapping.forEach(day => {
                                 overlapGrid[day] = {};
                                 timeSlots.forEach((_, sIdx) => {
-                                  overlapGrid[day][sIdx] = 0;
+                                  overlapGrid[day][sIdx] = new Set<string>();
                                 });
                               });
 
@@ -924,8 +939,8 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                                     
                                     const isOverlap = Math.max(recStartMin, slotStartMin) < Math.min(recEndMin, slotEndMin);
                                     if (isOverlap) {
-                                      if (overlapGrid[dayOfWeek] !== undefined) {
-                                        overlapGrid[dayOfWeek][sIdx] = (overlapGrid[dayOfWeek][sIdx] || 0) + 1;
+                                      if (overlapGrid[dayOfWeek] !== undefined && overlapGrid[dayOfWeek][sIdx] !== undefined) {
+                                        overlapGrid[dayOfWeek][sIdx].add(record.employeeId);
                                       }
                                     }
                                   });
@@ -1107,7 +1122,7 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                                                   {dayLabel}
                                                 </td>
                                                 {timeSlots.map((_, sIdx) => {
-                                                  const count = overlapGrid[dayNum]?.[sIdx] || 0;
+                                                  const count = overlapGrid[dayNum]?.[sIdx]?.size || 0;
                                                   
                                                   let cellStyle = "bg-slate-50/50 text-slate-350 border-slate-100";
                                                   if (count >= 3) {
@@ -1226,7 +1241,13 @@ export default function Main({ onCreatePayroll, onManageEmployees, employees, on
                                       </div>
                                       <div>
                                         <span className="text-slate-400 font-medium block">세금설정</span>
-                                        <span className="text-blue-600">{selectedCalc.taxType === 'FREELANCER' ? '3.3% 사업소득세' : '4대보험 공제'}</span>
+                                        <span className="text-blue-600">
+                                          {selectedCalc.taxType === 'FREELANCER'
+                                            ? '3.3% 사업소득세'
+                                            : selectedCalc.taxType === 'CUSTOM'
+                                            ? `커스텀 (${selectedCalc.customTaxRate || 0}%)`
+                                            : '4대보험 공제'}
+                                        </span>
                                       </div>
                                     </div>
                                   </div>
