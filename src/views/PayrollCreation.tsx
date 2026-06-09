@@ -749,7 +749,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                                             ...r,
                                             clockIn: updatedIn,
                                             isAbsence: !updatedIn || !r.clockOut,
-                                            isNightWork: nightHrs > 0 ? true : r.isNightWork
+                                            isNightWork: nightHrs > 0
                                           };
                                         }
                                         return r;
@@ -781,7 +781,7 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                                             ...r,
                                             clockOut: updatedOut,
                                             isAbsence: !r.clockIn || !updatedOut,
-                                            isNightWork: nightHrs > 0 ? true : r.isNightWork
+                                            isNightWork: nightHrs > 0
                                           };
                                         }
                                         return r;
@@ -1373,12 +1373,6 @@ export default function PayrollCreation({ employees, onBack, onSaveReport, editR
                         <span className="text-slate-500">주휴수당</span>
                         <span className="font-extrabold text-blue-600">+{formatCurrency(payroll.holidayAllowance)}</span>
                       </div>
-                      {payroll.overtimeAllowance !== undefined && payroll.overtimeAllowance > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">연장근로수당 ({payroll.overtimeHours.toFixed(1)}h)</span>
-                          <span className="font-extrabold text-violet-600">+{formatCurrency(payroll.overtimeAllowance)}</span>
-                        </div>
-                      )}
                       {payroll.nightAllowance !== undefined && payroll.nightAllowance > 0 && (
                         <div className="flex justify-between">
                           <span className="text-slate-500">야간근로수당 ({payroll.nightHours.toFixed(1)}h)</span>
