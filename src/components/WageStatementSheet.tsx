@@ -481,7 +481,7 @@ export default function WageStatementSheet({
                   <div className="text-center font-bold text-slate-800 border-2 border-dashed border-slate-300 rounded-lg py-4 mt-6 text-sm">
                     위 원천징수 및 근태 산정 보고서는 근로기준법 시행령 제27조의2에 근거하여 작성된 정식 임금명세서입니다.
                     <br />
-                    <span className="text-slate-500 font-bold mt-2 inline-block text-xs">작성 학원명: &ldquo;{academyName}&rdquo; &bull; 발행대행: AI Studio 최적화 자동 헬퍼</span>
+                    <span className="text-slate-500 font-bold mt-2 inline-block text-xs">작성 학원명: &ldquo;{academyName}&rdquo; &bull; </span>
                   </div>
                 </div>
               );
