@@ -22,7 +22,7 @@ export default function EmployeeManagement({ employees, onAddEmployee, onUpdateE
     name: '',
     position: '조교',
     ssn: '',
-    hourlyWage: 10320, // 2025 최저시급 기준
+    hourlyWage: 10030, // 2025 최저시급 기준
     weeklyHoliday: '일',
     hireDate: new Date().toISOString().split('T')[0],
     payday: 10,
